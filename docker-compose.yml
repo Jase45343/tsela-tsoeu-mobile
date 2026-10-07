@@ -2,19 +2,28 @@
 services:
   db:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: busledger
       POSTGRES_PASSWORD: busledger
       POSTGRES_DB: busledger
     ports: ["5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U busledger -d busledger"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
   api:
     build: { context: ., dockerfile: apps/server/Dockerfile }
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgres://busledger:busledger@db:5432/busledger
-      JWT_SECRET: change-me-to-a-long-random-string-of-32-plus-chars
+      JWT_SECRET: 5d81b3c4c036ff099a13c57981f644b48f31ba5313b1f46530d18f28fad5fd2c
       PORT: "8080"
     ports: ["8080:8080"]
-    depends_on: [db]
+    depends_on:
+      db:
+        condition: service_healthy
 volumes:
   pgdata:
