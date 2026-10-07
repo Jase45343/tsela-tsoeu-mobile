@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Bus Ledger",
+    "slug": "bus-ledger",
+    "scheme": "busledger",
+    "version": "1.3.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#E8ECF1",
+    "android": {
+      "package": "ls.busledger.app",
+      "softwareKeyboardLayoutMode": "resize",
+      "allowBackup": false
+    },
+    "plugins": [
+      "expo-router",
+      ["expo-sqlite", { "useSQLCipher": true }],
+      "expo-secure-store",
+      "expo-font",
+      ["expo-splash-screen", { "backgroundColor": "#00209F" }]
+    ],
+    "extra": {
+      "apiUrl": "http://10.0.2.2:8080"
+    }
+  }
+}

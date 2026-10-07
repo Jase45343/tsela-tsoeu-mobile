@@ -1,0 +1,10 @@
+{
+  "name": "bus-ledger",
+  "private": true,
+  "description": "School bus payment record-keeping for Lesotho operators (SRS v1.3, Phase 1)",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "test": "npm run test -w @busledger/core && npm run test -w @busledger/server",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}
