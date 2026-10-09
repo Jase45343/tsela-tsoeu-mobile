@@ -47,14 +47,26 @@ const MIGRATIONS: string[] = [
    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 ];
 
-export async function openDb(): Promise<DB> {
+let opening: Promise<DB> | null = null;
+
+/** Opens the database once per app session, so two callers can never race to create different keys. */
+export function openDb(): Promise<DB> {
+  opening ??= openDbOnce().catch((e) => {
+    opening = null;
+    throw e;
+  });
+  return opening;
+}
+
+async function openDbOnce(): Promise<DB> {
+  const key = await databaseKey();
   const db = await SQLite.openDatabaseAsync('busledger.db');
-  await db.execAsync(`PRAGMA key = "x'${await databaseKey()}'";`);
+  await db.execAsync(`PRAGMA key = "x'${key}'";`);
   await db.execAsync('PRAGMA journal_mode = WAL;');
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   let version = row?.user_version ?? 0;
   while (version < MIGRATIONS.length) {
-    await db.withExclusiveTransactionAsync(async (tx) => {
+    await db.withTransactionAsync(async () => { const tx = db;
       await tx.execAsync(MIGRATIONS[version]!);
       await tx.execAsync(`PRAGMA user_version = ${version + 1}`);
     });

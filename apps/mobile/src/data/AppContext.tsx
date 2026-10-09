@@ -269,7 +269,7 @@ function useAppState() {
       id: randomUUID(), studentId: student.id, year, month,
       amountDue: firstPeriodAmount(student.monthlyFee, choice, custom), dueDay: settings.dueDay, origin: 'onboarding',
     });
-    await d.withExclusiveTransactionAsync(async (tx) => {
+    await d.withTransactionAsync(async () => { const tx = d;
       await repo.saveStudent(tx, student);
       await repo.insertPeriod(tx, first, 'pending');
     });
@@ -311,7 +311,7 @@ function useAppState() {
       today, settings: operatorSettings,
     });
     const ackId = randomUUID();
-    await d.withExclusiveTransactionAsync(async (tx) => {
+    await d.withTransactionAsync(async () => { const tx = d;
       const seq = Number((await getMeta(tx, 'ack_seq')) ?? '0') + 1;
       const number = formatAckNumber(profile.ackPrefix, seq);
       if (opts.voidOriginal) await repo.voidPayment(tx, opts.voidOriginal.id, opts.voidOriginal.reason, nowIso);

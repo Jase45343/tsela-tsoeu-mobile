@@ -64,7 +64,7 @@ export async function runSync(db: DB, token: string, deviceId: string): Promise<
   const res = await api<SyncResponse>('/v1/sync', { body: { deviceId, cursor, push }, token, timeoutMs: 60_000 });
 
   let failed = 0;
-  await db.withExclusiveTransactionAsync(async (tx) => {
+  await db.withTransactionAsync(async () => { const tx = db;
     for (const r of res.results) {
       const local = revs.get(r.id);
       if (!local) continue;
