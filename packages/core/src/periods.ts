@@ -1,7 +1,9 @@
 import { compareMonths, daysInMonth, makeDate, monthKey, nextMonth, parts } from './dates';
 import { halfOf } from './money';
+import { monthlyCharge } from './charges';
 import type {
   BillingPeriod,
+  BillingRules,
   FirstPeriodChoice,
   ISODate,
   Lisente,
@@ -56,6 +58,8 @@ export function firstPeriodAmount(monthlyFee: Lisente, choice: FirstPeriodChoice
       return halfOf(monthlyFee);
     case 'free':
       return 0;
+    case 'prorata':
+      throw new Error('Use firstMonthCharge for pro-rata amounts; it needs the start date and school calendar');
     case 'custom':
       if (custom === undefined || !Number.isSafeInteger(custom) || custom < 0) {
         throw new Error('Custom first-period amount must be a non-negative whole number of lisente');
@@ -73,6 +77,8 @@ export interface PeriodToGenerate {
   year: number;
   month: number;
   amountDue: Lisente;
+  needsReview: boolean;
+  chargeNote: string | null;
 }
 
 /**
@@ -85,9 +91,10 @@ export interface PeriodToGenerate {
  * Used by the server (origin "server") and by an offline device (origin "provisional").
  */
 export function periodsToGenerate(
-  students: Pick<Student, 'id' | 'status' | 'monthlyFee' | 'onboardedAt'>[],
+  students: Pick<Student, 'id' | 'status' | 'monthlyFee' | 'onboardedAt' | 'school'>[],
   existing: Pick<BillingPeriod, 'studentId' | 'year' | 'month'>[],
   today: ISODate,
+  rules?: BillingRules,
 ): PeriodToGenerate[] {
   const latest = new Map<string, { year: number; month: number }>();
   const present = new Set<string>();
@@ -107,7 +114,10 @@ export function periodsToGenerate(
     let cursor = last ? nextMonth(last.year, last.month) : { year: onboard.year, month: onboard.month };
     while (compareMonths(cursor, now) <= 0) {
       if (!present.has(periodKey(s.id, cursor.year, cursor.month))) {
-        out.push({ studentId: s.id, year: cursor.year, month: cursor.month, amountDue: s.monthlyFee });
+        const c = rules
+          ? monthlyCharge(s.monthlyFee, cursor.year, cursor.month, s.school, rules)
+          : { amountDue: s.monthlyFee, needsReview: false, note: null };
+        out.push({ studentId: s.id, year: cursor.year, month: cursor.month, amountDue: c.amountDue, needsReview: c.needsReview, chargeNote: c.note });
       }
       cursor = nextMonth(cursor.year, cursor.month);
     }

@@ -137,7 +137,7 @@ export default function Record() {
 
       {original ? <Field label={t('voidReason')} value={reason} onChangeText={setReason} error={touched && !reason.trim() ? t('required') : null} /> : null}
 
-      <Sheet style={{ borderWidth: 2, borderColor: color.blue }}>
+      <Sheet style={{ borderWidth: 2, borderColor: color.brand }}>
         <Txt variant="heading" bold>{t('checkBeforeSaving')}</Txt>
         {[
           [t('kindStudent'), account.student.name],

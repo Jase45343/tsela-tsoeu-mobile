@@ -205,6 +205,62 @@ describe('sync and bookkeeping', () => {
   });
 });
 
+describe('billing rules and school calendars', () => {
+  it('saves rules and closures, and generates holiday months by them', async () => {
+    const op = await newOperator('62000030');
+    const closure = { id: randomUUID(), school: 'Maseru Prep', from: '2026-12-05', to: '2027-01-18', label: 'Summer holidays' };
+    const bad = await call('PUT', '/v1/settings', { schoolClosures: [{ ...closure, from: '2027-01-18', to: '2026-12-05' }] }, op.token);
+    assert.equal(bad.status, 400);
+    const saved = await call('PUT', '/v1/settings', { holidayRule: 'half_or_ask', firstMonthRule: 'half_after', halfCutoffDay: 20, schoolClosures: [closure] }, op.token);
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.holidayRule, 'half_or_ask');
+    assert.equal(saved.body.closures.length, 1);
+
+    const sid = randomUUID();
+    clock = new Date('2026-11-10T08:00:00Z');
+    let cursor = 0;
+    const sync = async (push: Record<string, unknown[]> = {}) => {
+      const r = await call('POST', '/v1/sync', { deviceId: op.deviceId, cursor, push }, op.token);
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      cursor = r.body.cursor;
+      return r.body;
+    };
+    const first = await sync({
+      students: [studentDto(sid, { onboardedAt: '2026-11-09' })],
+      periods: [{ id: randomUUID(), studentId: sid, year: 2026, month: 11, amountDue: M(1000), cancelled: false, origin: 'onboarding' }],
+    });
+    // First payment falls due on the start date, not the 1st.
+    assert.equal(first.periods[0].dueDate, '2026-11-09');
+    assert.equal(first.settings.holidayRule, 'half_or_ask');
+
+    clock = new Date('2026-12-01T06:00:00Z');
+    await generateAllPeriods(db, '2026-12-01');
+    const dec = (await sync()).periods.find((p: any) => p.month === 12);
+    assert.equal(dec.needsReview, true); // 4 of 23 school days
+    assert.equal(dec.chargeNote, '4/23');
+
+    // A changed charge needs a reason, and clears the review flag.
+    const noReason = await sync({ periods: [{ id: dec.id, studentId: sid, year: 2026, month: 12, amountDue: 0, cancelled: false, origin: 'server' }] });
+    assert.equal(noReason.results[0].reason, 'reason_required');
+    const decided = await sync({ periods: [{ id: dec.id, studentId: sid, year: 2026, month: 12, amountDue: 0, cancelled: false, origin: 'server', adjustReason: 'School closed most of December' }] });
+    const decAfter = decided.periods.find((p: any) => p.month === 12);
+    assert.equal(decAfter.amountDue, 0);
+    assert.equal(decAfter.needsReview, false);
+    assert.equal(decAfter.status, 'paid');
+    const audit = await db.query<{ action: string }>('SELECT action FROM audit_log WHERE entity_id = $1', [dec.id]);
+    assert.deepEqual(audit.rows.map((r) => r.action), ['charge_adjust']);
+
+    // Switching to the by-days rule applies from the next month generated.
+    await call('PUT', '/v1/settings', { holidayRule: 'by_days' }, op.token);
+    clock = new Date('2027-01-01T06:00:00Z');
+    await generateAllPeriods(db, '2027-01-01');
+    const jan = (await sync()).periods.find((p: any) => p.month === 1);
+    assert.equal(jan.amountDue, M(429)); // 9 of 21 school days, whole maloti
+    assert.equal(jan.needsReview, false);
+    clock = new Date('2026-10-06T08:00:00Z');
+  });
+});
+
 describe('account closure (FR-037)', () => {
   it('blocks a closed account, allows reopening, and purges after 90 days', async () => {
     const op = await newOperator('62000020');

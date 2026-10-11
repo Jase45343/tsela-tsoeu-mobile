@@ -9,7 +9,7 @@ export default function NewStudent() {
   return (
     <>
       <Stack.Screen options={{ title: t('addStudent') }} />
-      <StudentForm today={app.today} onSave={async (v) => {
+      <StudentForm today={app.today} rules={app.settings} onSave={async (v) => {
         const id = await app.addStudent(v.student, v.choice, v.custom);
         router.replace(`/student/${id}`);
       }} />

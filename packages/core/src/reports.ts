@@ -52,7 +52,7 @@ export function summarizeMonth(accounts: StudentAccount[], year: number, month: 
 
   for (const acc of accounts) {
     if (acc.student.status === 'active') s.activeStudents++;
-    s.totalCredit += acc.credit;
+    s.totalCredit += acc.credit + acc.prepaid;
 
     for (const v of acc.periods) {
       const cmp = compareMonths(v.period, { year, month });

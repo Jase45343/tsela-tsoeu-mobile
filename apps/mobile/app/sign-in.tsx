@@ -1,22 +1,25 @@
 import { useState } from 'react';
-import { View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { normalizeLesothoPhone, type Lang } from '@busledger/core';
 import { useApp } from '../src/data/AppContext';
 import { ApiError } from '../src/sync/api';
 import { useT } from '../src/lib/i18n';
-import { Banner, Btn, Chip, ChipRow, Field, Icon, Screen, Txt } from '../src/ui/kit';
-import { color, space } from '../src/ui/theme';
+import { Banner, Btn, Field, Icon, Screen, Txt, type IconName } from '../src/ui/kit';
+import { color, font, radius, space } from '../src/ui/theme';
 
-type Mode = 'signIn' | 'register' | 'reset';
+const LOGO_ON_DARK = require('../assets/logo-on-dark.png');
+const PHOTO = require('../assets/welcome-photo.jpg');
+
+type Mode = 'welcome' | 'signIn' | 'register' | 'reset';
 
 export default function SignIn() {
   const app = useApp();
   const { t, lang } = useT();
   const insets = useSafeAreaInsets();
   const { reauth } = useLocalSearchParams<{ reauth?: string }>();
-  const [mode, setMode] = useState<Mode>('signIn');
+  const [mode, setMode] = useState<Mode>(reauth || app.profile ? 'signIn' : 'welcome');
   const [phone, setPhone] = useState(app.profile?.phone.replace('+266', '') ?? '');
   const [pin, setPin] = useState('');
   const [name, setName] = useState('');
@@ -57,19 +60,79 @@ export default function SignIn() {
 
   const switchMode = (m: Mode) => { setMode(m); setError(null); setTouched(false); setCodeSent(false); setPin(''); };
 
+  const langSwitch = (
+    <View style={s.langRow}>
+      {(['en', 'st'] as Lang[]).map((l) => (
+        <Pressable key={l} accessibilityRole="button" accessibilityState={{ selected: lang === l }} onPress={() => app.setLang(l)}
+          style={[s.langChip, lang === l && { backgroundColor: color.sand }]}>
+          <Txt variant="small" bold tone={lang === l ? color.night : color.sand}>{l === 'en' ? 'English' : 'Sesotho'}</Txt>
+        </Pressable>
+      ))}
+    </View>
+  );
+
+  if (mode === 'welcome') {
+    const feature = (icon: IconName, label: string) => (
+      <View style={s.feature}>
+        <View style={s.featureIcon}><Icon name={icon} size={26} tone={color.sand} /></View>
+        <Txt variant="label" tone={color.sand} center>{label}</Txt>
+      </View>
+    );
+    return (
+      <View style={{ flex: 1, backgroundColor: color.night }}>
+        <ScrollView contentContainerStyle={{ paddingTop: insets.top + space.md, paddingBottom: insets.bottom + space.xl }}>
+          <View style={{ paddingHorizontal: space.lg }}>{langSwitch}</View>
+          <View style={{ alignItems: 'center', paddingHorizontal: space.xl, gap: space.sm, marginTop: space.lg }}>
+            <Image source={LOGO_ON_DARK} style={{ width: 168, height: 90 }} resizeMode="contain" accessibilityIgnoresInvertColors />
+            <Txt style={s.brand} center>Tsela-Tšoeu</Txt>
+            <Txt variant="small" bold tone={color.sandSoft} center style={{ letterSpacing: 2.5 }}>{t('appSubtitle').toUpperCase()}</Txt>
+            <View style={s.rule} />
+            <Txt variant="title" tone={color.sand} center style={{ fontFamily: font.regular }}>{t('tagline1')}{'\n'}{t('tagline2')}</Txt>
+            <Txt tone={color.sandSoft} center style={{ maxWidth: 340 }}>{t('welcomeBody')}</Txt>
+          </View>
+          <Image source={PHOTO} style={{ width: '100%', aspectRatio: 740 / 500, marginTop: space.md }} resizeMode="cover" accessible={false} />
+          <View style={{ paddingHorizontal: space.lg, gap: space.lg, marginTop: -space.xl }}>
+            <View style={s.features}>
+              {feature('account-group-outline', t('featStudents'))}
+              <View style={s.featureRule} />
+              {feature('credit-card-outline', t('featPayments'))}
+              <View style={s.featureRule} />
+              {feature('chart-bar', t('featReports'))}
+            </View>
+            <Pressable accessibilityRole="button" onPress={() => switchMode('register')}
+              style={({ pressed }) => [s.cta, { backgroundColor: pressed ? color.actionPressed : color.action }]}>
+              <Txt variant="heading" bold tone={color.onAction}>{t('getStarted')}</Txt>
+              <Icon name="arrow-right" tone={color.onAction} />
+            </Pressable>
+            <Pressable accessibilityRole="button" onPress={() => switchMode('signIn')} style={s.login}>
+              <Txt bold tone={color.copper} style={{ textDecorationLine: 'underline' }}>{t('logIn')}</Txt>
+              <Icon name="arrow-right" size={20} tone={color.copper} />
+            </Pressable>
+            <View style={{ alignItems: 'center', gap: 2, marginTop: space.sm }}>
+              <Txt variant="small" bold tone={color.sandSoft} style={{ letterSpacing: 2.5 }}>LESOTHO</Txt>
+              <Txt variant="small" tone={color.sandSoft} center>{t('footerLine')}</Txt>
+            </View>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: color.ground }}>
-      <View style={{ backgroundColor: color.blue, paddingTop: insets.top + space.xl, paddingHorizontal: space.lg, paddingBottom: space.xl, gap: space.sm }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-          <Icon name="bus-school" size={36} tone={color.yellow} />
-          <Txt variant="title" tone={color.sheet}>Bus Ledger</Txt>
+      <View style={{ backgroundColor: color.night, paddingTop: insets.top + space.md, paddingHorizontal: space.lg, paddingBottom: space.lg, gap: space.md }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          {!reauth && !app.profile ? (
+            <Pressable accessibilityRole="button" accessibilityLabel={t('back')} onPress={() => switchMode('welcome')} style={s.back}>
+              <Icon name="arrow-left" tone={color.sand} />
+            </Pressable>
+          ) : <View />}
+          {langSwitch}
         </View>
-        <Txt tone={color.sheet}>{t('welcome')}</Txt>
-        <ChipRow>
-          {(['en', 'st'] as Lang[]).map((l) => (
-            <Chip key={l} label={l === 'en' ? 'English' : 'Sesotho'} selected={lang === l} onPress={() => app.setLang(l)} />
-          ))}
-        </ChipRow>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+          <Image source={LOGO_ON_DARK} style={{ width: 64, height: 34 }} resizeMode="contain" />
+          <Txt variant="title" tone={color.sand}>Tsela-Tšoeu</Txt>
+        </View>
       </View>
       <Screen
         footer={
@@ -106,3 +169,17 @@ export default function SignIn() {
     </View>
   );
 }
+
+const s = StyleSheet.create({
+  langRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: space.xs },
+  langChip: { minHeight: 40, paddingHorizontal: space.md, borderRadius: radius.pill, borderWidth: 1, borderColor: color.sandSoft, justifyContent: 'center' },
+  brand: { fontFamily: font.bold, fontSize: 44, lineHeight: 52, color: color.sand, letterSpacing: -1 },
+  rule: { width: 56, height: 3, borderRadius: 2, backgroundColor: color.copper, marginVertical: space.sm },
+  features: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  feature: { flex: 1, alignItems: 'center', gap: space.sm },
+  featureIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: color.brand, alignItems: 'center', justifyContent: 'center' },
+  featureRule: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', backgroundColor: color.sandSoft, opacity: 0.5, marginVertical: space.sm },
+  cta: { minHeight: 60, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.sm, borderWidth: 1, borderColor: color.copper },
+  login: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space.xs },
+  back: { minWidth: 48, minHeight: 48, justifyContent: 'center' },
+});

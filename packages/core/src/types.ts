@@ -45,6 +45,10 @@ export interface BillingPeriod {
   amountDue: Lisente;
   cancelled: boolean;
   origin: PeriodOrigin;
+  /** Set when the holiday rule leaves this month's charge for the driver to decide. */
+  needsReview?: boolean;
+  /** Why the charge is what it is, e.g. "8 of 21 school days" or the driver's reason for a change. */
+  chargeNote?: string | null;
 }
 
 export type PeriodStatus = 'unpaid' | 'partial' | 'paid' | 'cancelled';
@@ -103,8 +107,44 @@ export interface OperatorSettings {
 
 export const DEFAULT_SETTINGS: OperatorSettings = { dueDay: 1, graceDays: 7 };
 
+/**
+ * How a student's first month is charged when they start partway through it.
+ * full       — always the full monthly fee
+ * ask        — the driver chooses each time (full, half, free or another amount)
+ * half_after — half the fee if they start on or after the cut-off day
+ * prorata    — only the school days left in the month
+ */
+export type FirstMonthRule = 'full' | 'ask' | 'half_after' | 'prorata';
+
+/**
+ * How months with school holidays are charged.
+ * same        — the same fee every month, holidays or not
+ * by_days     — the fee scaled by the school days the bus runs
+ * half_or_ask — full fee if the bus runs at least half the month; otherwise the driver decides
+ */
+export type HolidayRule = 'same' | 'by_days' | 'half_or_ask';
+
+/** A period when a school is closed, first to last closed day inclusive. school null = every school. */
+export interface SchoolClosure {
+  id: string;
+  school: string | null;
+  from: ISODate;
+  to: ISODate;
+  label: string;
+}
+
+export interface BillingRules {
+  firstMonthRule: FirstMonthRule;
+  halfCutoffDay: number;
+  holidayRule: HolidayRule;
+  closures: SchoolClosure[];
+}
+
+/** Matches what most drivers do today: the full fee, every month. */
+export const DEFAULT_BILLING_RULES: BillingRules = { firstMonthRule: 'full', halfCutoffDay: 15, holidayRule: 'same', closures: [] };
+
 export const DEFAULT_PAYMENT_METHODS = ['Cash', 'M-Pesa', 'EcoCash', 'Bank Transfer', 'Other'] as const;
 
 export type AccountStatus = 'current' | 'in_arrears' | 'in_advance';
 
-export type FirstPeriodChoice = 'full' | 'half' | 'free' | 'custom';
+export type FirstPeriodChoice = 'full' | 'half' | 'prorata' | 'free' | 'custom';

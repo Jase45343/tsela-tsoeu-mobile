@@ -33,7 +33,7 @@ export function LockScreen() {
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: color.ground, paddingTop: insets.top + space.xxl, padding: space.xl, gap: space.xl }]}>
       <View style={{ alignItems: 'center', gap: space.md }}>
-        <Icon name="lock" size={48} tone={color.blue} />
+        <Icon name="lock" size={48} tone={color.brand} />
         <Txt variant="title" center>{t('unlockTitle')}</Txt>
         {app.profile ? <Txt tone={color.inkSoft} center>{app.profile.name}</Txt> : null}
       </View>

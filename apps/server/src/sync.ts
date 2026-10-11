@@ -6,6 +6,7 @@ import {
   makeDate,
   periodBounds,
   dueDateFor,
+  firstDueDate,
   type ISODate,
 } from '@busledger/core';
 import type { z } from 'zod';
@@ -100,7 +101,7 @@ export async function applyPush(q: Queryable, ctx: SyncContext, push: z.infer<ty
     results.push(ok(s.id));
   }
 
-  // 2. Periods: onboarding periods (FR-005) and cancellations (FR-010) only.
+  // 2. Periods: onboarding periods (FR-005), cancellations (FR-010) and charges changed by hand.
   for (const raw of push.periods) {
     const p = parse(PeriodPush, raw);
     if (!p.ok) { results.push(p.result); continue; }
@@ -111,6 +112,18 @@ export async function applyPush(q: Queryable, ctx: SyncContext, push: z.infer<ty
     const byId = await q.query<PeriodRow>('SELECT * FROM billing_periods WHERE id = $1 AND student_id = $2', [per.id, per.studentId]);
     const row = byId.rows[0];
     if (row) {
+      if (row.amount_due !== per.amountDue) {
+        if (!per.adjustReason) {
+          results.push(rejected(per.id, 'reason_required', 'Give a reason when changing a month\'s charge.'));
+          continue;
+        }
+        await q.query(
+          `UPDATE billing_periods SET amount_due = $2, needs_review = false, charge_note = $3, server_seq = nextval('change_seq') WHERE id = $1`,
+          [row.id, per.amountDue, per.adjustReason],
+        );
+        await audit(q, { userId: ctx.userId, deviceId: ctx.deviceId, entityType: 'period', entityId: row.id, action: 'charge_adjust', previous: { amountDue: row.amount_due }, next: { amountDue: per.amountDue, reason: per.adjustReason } });
+        touched.add(per.studentId);
+      }
       if (row.cancelled !== per.cancelled) {
         await q.query(`UPDATE billing_periods SET cancelled = $2, server_seq = nextval('change_seq') WHERE id = $1`, [row.id, per.cancelled]);
         await audit(q, { userId: ctx.userId, deviceId: ctx.deviceId, entityType: 'period', entityId: row.id, action: per.cancelled ? 'cancel' : 'uncancel', previous: { cancelled: row.cancelled }, next: { cancelled: per.cancelled } });
@@ -134,14 +147,17 @@ export async function applyPush(q: Queryable, ctx: SyncContext, push: z.infer<ty
     if (clash?.origin === 'onboarding') { results.push(ignored(per.id, 'already_onboarded')); continue; }
     if (clash) {
       // The server generated this month before the onboarding record arrived: the operator's choice wins.
-      await q.query(`UPDATE billing_periods SET amount_due = $2, origin = 'onboarding', cancelled = $3, server_seq = nextval('change_seq') WHERE id = $1`, [clash.id, per.amountDue, per.cancelled]);
+      await q.query(
+        `UPDATE billing_periods SET amount_due = $2, origin = 'onboarding', cancelled = $3, due_date = $4, needs_review = false, server_seq = nextval('change_seq') WHERE id = $1`,
+        [clash.id, per.amountDue, per.cancelled, firstDueDate(clash.due_date, student.onboarded_at)],
+      );
       await audit(q, { userId: ctx.userId, deviceId: ctx.deviceId, entityType: 'period', entityId: clash.id, action: 'first_period_override', previous: { amountDue: clash.amount_due }, next: { amountDue: per.amountDue } });
     } else {
       const b = periodBounds(per.year, per.month);
       await q.query(
         `INSERT INTO billing_periods (id, user_id, student_id, year, month, period_start, period_end, due_date, amount_due, balance, cancelled, origin)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,'onboarding')`,
-        [per.id, ctx.userId, per.studentId, per.year, per.month, b.periodStart, b.periodEnd, dueDateFor(per.year, per.month, dueDay), per.amountDue, per.cancelled],
+        [per.id, ctx.userId, per.studentId, per.year, per.month, b.periodStart, b.periodEnd, firstDueDate(dueDateFor(per.year, per.month, dueDay), student.onboarded_at), per.amountDue, per.cancelled],
       );
     }
     touched.add(per.studentId);
@@ -290,6 +306,7 @@ export async function pullChanges(q: Queryable, userId: string, cursor: number) 
     periods: periods.rows.map((r) => ({
       id: r.id, studentId: r.student_id, year: r.year, month: r.month, periodStart: r.period_start, periodEnd: r.period_end,
       dueDate: r.due_date, amountDue: r.amount_due, cancelled: r.cancelled, origin: r.origin,
+      needsReview: r.needs_review, chargeNote: r.charge_note,
       amountRecorded: r.amount_recorded, balance: r.balance, status: r.status,
     })),
     payments: payments.rows.map((r) => ({

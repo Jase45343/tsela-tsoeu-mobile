@@ -1,11 +1,12 @@
 import type { DB } from '../db/database';
 import { getMeta, setMeta } from '../db/database';
+import type { BillingRules } from '@busledger/core';
 import { api } from './api';
 
 type Row = Record<string, any>;
 type Result = { id: string; status: 'ok' | 'ignored' | 'rejected'; reason?: string; message?: string };
 
-export interface RemoteSettings {
+export interface RemoteSettings extends BillingRules {
   dueDay: number;
   graceDays: number;
   businessName: string;
@@ -47,7 +48,7 @@ export async function runSync(db: DB, token: string, deviceId: string): Promise<
       pickupLocation: r.pickup_location, dropoffLocation: r.dropoff_location, monthlyFee: r.monthly_fee,
       onboardedAt: r.onboarded_at, status: r.status,
     })),
-    periods: periods!.map((r) => ({ id: r.id, studentId: r.student_id, year: r.year, month: r.month, amountDue: r.amount_due, cancelled: r.cancelled === 1, origin: r.origin })),
+    periods: periods!.map((r) => ({ id: r.id, studentId: r.student_id, year: r.year, month: r.month, amountDue: r.amount_due, cancelled: r.cancelled === 1, origin: r.origin, adjustReason: r.adjust_reason ?? null })),
     payments: payments!.map((r) => ({
       id: r.id, studentId: r.student_id, amount: r.amount, method: r.method, paymentDate: r.payment_date, reference: r.reference,
       note: r.note, source: r.source, createdAt: r.created_at, idempotencyKey: r.idempotency_key, acknowledgementNumber: r.ack_number,
@@ -97,11 +98,13 @@ export async function runSync(db: DB, token: string, deviceId: string): Promise<
       await tx.runAsync(`DELETE FROM periods WHERE student_id = ? AND year = ? AND month = ? AND id != ? AND sync_status IN ('synced','local')`, [p.studentId, p.year, p.month, p.id]);
       try {
         await tx.runAsync(
-          `INSERT INTO periods (id, student_id, year, month, period_start, period_end, due_date, amount_due, cancelled, origin, rev, sync_status)
-           VALUES (?,?,?,?,?,?,?,?,?,?,1,'synced')
-           ON CONFLICT(id) DO UPDATE SET amount_due=excluded.amount_due, due_date=excluded.due_date, cancelled=excluded.cancelled, origin=excluded.origin
+          `INSERT INTO periods (id, student_id, year, month, period_start, period_end, due_date, amount_due, cancelled, origin, needs_review, charge_note, rev, sync_status)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,'synced')
+           ON CONFLICT(id) DO UPDATE SET amount_due=excluded.amount_due, due_date=excluded.due_date, cancelled=excluded.cancelled, origin=excluded.origin,
+             needs_review=excluded.needs_review, charge_note=excluded.charge_note
            WHERE periods.sync_status IN ('synced','local')`,
-          [p.id, p.studentId, p.year, p.month, p.periodStart, p.periodEnd, p.dueDate, p.amountDue, p.cancelled ? 1 : 0, p.origin],
+          [p.id, p.studentId, p.year, p.month, p.periodStart, p.periodEnd, p.dueDate, p.amountDue, p.cancelled ? 1 : 0, p.origin,
+            p.needsReview ? 1 : 0, p.chargeNote ?? null],
         );
       } catch {
         // A local change for this month is still waiting to sync; it wins until accepted.

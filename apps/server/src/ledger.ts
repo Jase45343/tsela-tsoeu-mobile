@@ -3,8 +3,11 @@ import {
   buildBook,
   buildPeriod,
   computeLedger,
+  firstDueDate,
+  parts,
   periodsToGenerate,
   type BillingPeriod,
+  type BillingRules,
   type CreditAdjustment,
   type ISODate,
   type OperatorSettings,
@@ -24,7 +27,7 @@ export interface StudentRow {
 export interface PeriodRow {
   id: string; student_id: string; year: number; month: number; period_start: string; period_end: string;
   due_date: string; amount_due: number; amount_recorded: number; balance: number; status: string;
-  cancelled: boolean; origin: 'server' | 'onboarding'; server_seq: number;
+  cancelled: boolean; origin: 'server' | 'onboarding'; needs_review: boolean; charge_note: string | null; server_seq: number;
 }
 export interface PaymentRow {
   id: string; student_id: string; amount: number; method: string; payment_date: string; reference: string | null;
@@ -44,6 +47,7 @@ export const toStudent = (r: StudentRow): Student => ({
 export const toPeriod = (r: PeriodRow): BillingPeriod => ({
   id: r.id, studentId: r.student_id, year: r.year, month: r.month, periodStart: r.period_start,
   periodEnd: r.period_end, dueDate: r.due_date, amountDue: r.amount_due, cancelled: r.cancelled, origin: r.origin,
+  needsReview: r.needs_review, chargeNote: r.charge_note,
 });
 export const toPayment = (r: PaymentRow): Payment => ({
   id: r.id, studentId: r.student_id, amount: r.amount, method: r.method, paymentDate: r.payment_date,
@@ -70,14 +74,22 @@ export async function loadStudentLedgerInputs(q: Queryable, studentId: string) {
   };
 }
 
-export async function loadSettings(q: Queryable, userId: string): Promise<OperatorSettings & { businessName: string; paymentMethods: string[] }> {
-  const { rows } = await q.query<{ due_day: number; grace_days: number; business_name: string; payment_methods: string[] }>(
-    'SELECT due_day, grace_days, business_name, payment_methods FROM users WHERE id = $1',
+export type FullSettings = OperatorSettings & BillingRules & { businessName: string; paymentMethods: string[] };
+
+export async function loadSettings(q: Queryable, userId: string): Promise<FullSettings> {
+  const { rows } = await q.query<{
+    due_day: number; grace_days: number; business_name: string; payment_methods: string[];
+    first_month_rule: BillingRules['firstMonthRule']; half_cutoff_day: number; holiday_rule: BillingRules['holidayRule']; school_closures: BillingRules['closures'];
+  }>(
+    'SELECT due_day, grace_days, business_name, payment_methods, first_month_rule, half_cutoff_day, holiday_rule, school_closures FROM users WHERE id = $1',
     [userId],
   );
   const r = rows[0];
   if (!r) throw new Error('User not found');
-  return { dueDay: r.due_day, graceDays: r.grace_days, businessName: r.business_name, paymentMethods: r.payment_methods };
+  return {
+    dueDay: r.due_day, graceDays: r.grace_days, businessName: r.business_name, paymentMethods: r.payment_methods,
+    firstMonthRule: r.first_month_rule, halfCutoffDay: r.half_cutoff_day, holidayRule: r.holiday_rule, closures: r.school_closures,
+  };
 }
 
 export async function loadAccounts(q: Queryable, userId: string, today: ISODate): Promise<StudentAccount[]> {
@@ -106,7 +118,8 @@ export async function loadAccounts(q: Queryable, userId: string, today: ISODate)
  * Returns the ids of students that received a new period.
  */
 export async function ensurePeriods(q: Queryable, userId: string, today: ISODate): Promise<Set<string>> {
-  const { dueDay } = await loadSettings(q, userId);
+  const settings = await loadSettings(q, userId);
+  const { dueDay } = settings;
   const students = await q.query<StudentRow>('SELECT * FROM students WHERE user_id = $1 AND status = $2', [userId, 'active']);
   if (students.rows.length === 0) return new Set();
   const existing = await q.query<{ student_id: string; year: number; month: number }>(
@@ -117,14 +130,19 @@ export async function ensurePeriods(q: Queryable, userId: string, today: ISODate
     students.rows.map(toStudent),
     existing.rows.map((r) => ({ studentId: r.student_id, year: r.year, month: r.month })),
     today,
+    settings,
   );
+  const onboarded = new Map(students.rows.map((s) => [s.id, s.onboarded_at]));
   const touched = new Set<string>();
   for (const t of todo) {
     const p = buildPeriod({ id: randomUUID(), studentId: t.studentId, year: t.year, month: t.month, amountDue: t.amountDue, dueDay, origin: 'server' });
+    const start = onboarded.get(t.studentId)!;
+    const s0 = parts(start);
+    if (s0.year === t.year && s0.month === t.month) p.dueDate = firstDueDate(p.dueDate, start);
     const ins = await q.query(
-      `INSERT INTO billing_periods (id, user_id, student_id, year, month, period_start, period_end, due_date, amount_due, balance, origin)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,'server') ON CONFLICT (student_id, year, month) DO NOTHING RETURNING id`,
-      [p.id, userId, p.studentId, p.year, p.month, p.periodStart, p.periodEnd, p.dueDate, p.amountDue],
+      `INSERT INTO billing_periods (id, user_id, student_id, year, month, period_start, period_end, due_date, amount_due, balance, origin, needs_review, charge_note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,'server',$10,$11) ON CONFLICT (student_id, year, month) DO NOTHING RETURNING id`,
+      [p.id, userId, p.studentId, p.year, p.month, p.periodStart, p.periodEnd, p.dueDate, p.amountDue, t.needsReview, t.chargeNote],
     );
     if (ins.rows.length) touched.add(t.studentId);
   }

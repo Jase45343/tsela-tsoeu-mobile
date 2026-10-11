@@ -13,7 +13,7 @@ export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: color.blue,
+        tabBarActiveTintColor: color.brand,
         tabBarInactiveTintColor: color.inkSoft,
         tabBarLabelStyle: { fontFamily: font.bold, fontSize: 13 },
         tabBarStyle: { height: 68, paddingTop: 6, paddingBottom: 8, backgroundColor: color.sheet },

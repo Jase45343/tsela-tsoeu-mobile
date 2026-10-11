@@ -48,7 +48,7 @@ export function Sheet({ children, style }: { children: ReactNode; style?: StyleP
 export function Btn({ label, onPress, kind = 'secondary', icon, disabled, busy }: {
   label: string; onPress: () => void; kind?: 'primary' | 'secondary' | 'quiet' | 'danger'; icon?: IconName; disabled?: boolean; busy?: boolean;
 }) {
-  const fg = kind === 'primary' ? color.ink : kind === 'danger' ? color.owing : color.blue;
+  const fg = kind === 'primary' ? color.onAction : kind === 'danger' ? color.owing : color.brand;
   return (
     <Pressable
       accessibilityRole="button"
@@ -57,10 +57,10 @@ export function Btn({ label, onPress, kind = 'secondary', icon, disabled, busy }
       onPress={onPress}
       style={({ pressed }) => [
         s.btn,
-        kind === 'primary' && { backgroundColor: pressed ? color.yellowPressed : color.yellow, minHeight: 60 },
-        kind === 'secondary' && { borderWidth: 2, borderColor: color.blue, backgroundColor: pressed ? color.blueTint : color.sheet },
+        kind === 'primary' && { backgroundColor: pressed ? color.actionPressed : color.action, minHeight: 60 },
+        kind === 'secondary' && { borderWidth: 2, borderColor: color.brand, backgroundColor: pressed ? color.brandTint : color.sheet },
         kind === 'danger' && { borderWidth: 2, borderColor: color.owing, backgroundColor: pressed ? color.owingTint : color.sheet },
-        kind === 'quiet' && { backgroundColor: pressed ? color.blueTint : 'transparent' },
+        kind === 'quiet' && { backgroundColor: pressed ? color.brandTint : 'transparent' },
         (disabled || busy) && { opacity: 0.45 },
       ]}
     >
@@ -82,7 +82,7 @@ export function Field({ label, error, hint, optional, ...input }: TextInputProps
         onFocus={(e) => { setFocus(true); input.onFocus?.(e); }}
         onBlur={(e) => { setFocus(false); input.onBlur?.(e); }}
         placeholderTextColor={color.muted}
-        style={[s.input, focus && { borderColor: color.blue }, !!error && { borderColor: color.owing }, input.multiline && { minHeight: 96, textAlignVertical: 'top' }]}
+        style={[s.input, focus && { borderColor: color.brand }, !!error && { borderColor: color.owing }, input.multiline && { minHeight: 96, textAlignVertical: 'top' }]}
       />
       {error ? (
         <View style={s.inline}><MaterialCommunityIcons name="alert-circle" size={18} color={color.owing} /><Txt variant="small" tone={color.owing} style={{ flex: 1 }}>{error}</Txt></View>
@@ -97,7 +97,7 @@ export function Chip({ label, selected, onPress, icon }: { label: string; select
       accessibilityRole="radio"
       accessibilityState={{ selected: !!selected }}
       onPress={onPress}
-      style={[s.chip, selected ? { backgroundColor: color.blue, borderColor: color.blue } : null]}
+      style={[s.chip, selected ? { backgroundColor: color.brand, borderColor: color.brand } : null]}
     >
       {selected ? <MaterialCommunityIcons name="check" size={18} color={color.sheet} /> : icon ? <MaterialCommunityIcons name={icon} size={18} color={color.ink} /> : null}
       <Txt variant="label" bold tone={selected ? color.sheet : color.ink}>{label}</Txt>
@@ -136,7 +136,7 @@ export function StatusTag({ tag, label }: { tag: Tag; label?: string }) {
 
 export function ListRow({ title, subtitle, right, onPress, leading }: { title: string; subtitle?: ReactNode; right?: ReactNode; onPress?: () => void; leading?: ReactNode }) {
   return (
-    <Pressable accessibilityRole={onPress ? 'button' : undefined} onPress={onPress} disabled={!onPress} style={({ pressed }) => [s.row, pressed && { backgroundColor: color.blueTint }]}>
+    <Pressable accessibilityRole={onPress ? 'button' : undefined} onPress={onPress} disabled={!onPress} style={({ pressed }) => [s.row, pressed && { backgroundColor: color.brandTint }]}>
       {leading}
       <View style={{ flex: 1, gap: 2 }}>
         <Txt bold numberOfLines={1}>{title}</Txt>
@@ -153,7 +153,7 @@ export function Divider() {
 }
 
 export function Banner({ tone, text, icon, action }: { tone: 'info' | 'warn' | 'danger'; text: string; icon?: IconName; action?: { label: string; onPress: () => void } }) {
-  const c = tone === 'danger' ? { fg: color.owing, bg: color.owingTint } : tone === 'warn' ? { fg: color.partial, bg: color.partialTint } : { fg: color.blue, bg: color.blueTint };
+  const c = tone === 'danger' ? { fg: color.owing, bg: color.owingTint } : tone === 'warn' ? { fg: color.partial, bg: color.partialTint } : { fg: color.brand, bg: color.brandTint };
   return (
     <View style={[s.banner, { backgroundColor: c.bg, borderLeftColor: c.fg }]}>
       <View style={s.inline}>
@@ -212,6 +212,29 @@ export function DateChooser({ value, onChange, today, label, allowFuture }: {
         <Chip label={t('yesterday')} selected={value === yesterday} onPress={() => onChange(yesterday)} />
         <Chip icon="calendar" label={isOther ? formatDateLong(value, lang) : t('otherDate')} selected={isOther} onPress={openCalendar} />
       </ChipRow>
+    </View>
+  );
+}
+
+/** A single date, picked from the Android calendar. Used where any day may apply, such as school holidays. */
+export function DateField({ label, value, onChange, minimumDate }: { label: string; value: ISODate | null; onChange: (d: ISODate) => void; minimumDate?: ISODate }) {
+  const { t, lang } = useT();
+  const open = () =>
+    DateTimePickerAndroid.open({
+      value: value ? toDate(value) : new Date(),
+      mode: 'date',
+      minimumDate: minimumDate ? toDate(minimumDate) : undefined,
+      onChange: (event, picked) => {
+        if (event.type === 'set' && picked) onChange(fromDate(picked));
+      },
+    });
+  return (
+    <View style={{ gap: space.xs }}>
+      <Txt variant="label" bold>{label}</Txt>
+      <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={open} style={[s.input, { flexDirection: 'row', alignItems: 'center', gap: space.sm }]}>
+        <MaterialCommunityIcons name="calendar" size={22} color={color.brand} />
+        <Txt tone={value ? color.ink : color.muted}>{value ? formatDateLong(value, lang) : t('otherDate')}</Txt>
+      </Pressable>
     </View>
   );
 }

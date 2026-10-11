@@ -6,6 +6,7 @@ import { useApp } from '../../../src/data/AppContext';
 import { useT } from '../../../src/lib/i18n';
 import { Banner, Btn, Divider, Figure, ListRow, Screen, SectionTitle, Sheet, StatusTag, Txt } from '../../../src/ui/kit';
 import { color, space } from '../../../src/ui/theme';
+import { parseDays } from '../../../src/lib/days';
 
 /** FR-021: one student's account. */
 export default function StudentAccountScreen() {
@@ -66,13 +67,25 @@ export default function StudentAccountScreen() {
               title={formatMonth(v.period.year, v.period.month, lang)}
               subtitle={
                 v.period.cancelled ? undefined
-                  : `${t('recordedOf', { a: formatMaloti(v.state.amountRecorded), b: formatMaloti(v.period.amountDue) })}${v.overdue ? ` · ${t('daysOverdue', { n: v.daysOverdue })}` : ''}${v.period.origin === 'provisional' ? ` · ${t('notConfirmed')}` : ''}`
+                  : [
+                    t('recordedOf', { a: formatMaloti(v.state.amountRecorded), b: formatMaloti(v.period.amountDue) }),
+                    v.overdue ? t('daysOverdue', { n: v.daysOverdue }) : null,
+                    parseDays(v.period.chargeNote) ? t('daysRun', parseDays(v.period.chargeNote)!) : v.period.chargeNote,
+                    v.period.origin === 'provisional' ? t('notConfirmed') : null,
+                  ].filter(Boolean).join(' · ')
               }
-              right={<StatusTag tag={v.state.status} />}
+              right={
+                v.period.needsReview ? <StatusTag tag="partial" label={t('reviewTitle')} />
+                  : v.upcoming && v.state.status !== 'paid' ? <StatusTag tag="cancelled" label={t('notStarted')} />
+                  : <StatusTag tag={v.state.status} />
+              }
               onPress={v.period.origin === 'provisional' ? undefined : () => setOpen(open === v.period.id ? null : v.period.id)}
             />
             {open === v.period.id ? (
-              <View style={{ paddingHorizontal: space.lg, paddingBottom: space.md }}>
+              <View style={{ paddingHorizontal: space.lg, paddingBottom: space.md, gap: space.sm }}>
+                {!v.period.cancelled ? (
+                  <Btn kind="secondary" icon="pencil" label={t('changeCharge')} onPress={() => { setOpen(null); router.push(`/charge?periodId=${v.period.id}`); }} />
+                ) : null}
                 <Btn kind={v.period.cancelled ? 'secondary' : 'danger'} label={v.period.cancelled ? t('chargeAgain') : t('dontCharge')}
                   onPress={() => { setOpen(null); void app.setPeriodCancelled(v.period.id, !v.period.cancelled); }} />
               </View>

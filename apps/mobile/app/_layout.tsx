@@ -35,7 +35,7 @@ function Shell({ fontsLoaded }: { fontsLoaded: boolean }) {
       <Stack
         screenOptions={{
           headerStyle: { backgroundColor: color.sheet },
-          headerTintColor: color.blue,
+          headerTintColor: color.brand,
           headerTitleStyle: { fontFamily: font.bold, color: color.ink, fontSize: 20 },
           headerShadowVisible: false,
           contentStyle: { backgroundColor: color.ground },

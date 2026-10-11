@@ -1,5 +1,6 @@
 import { computeLedger, type Ledger } from './allocation';
 import { addDays, diffDays, parts } from './dates';
+import { isUpcoming } from './charges';
 import type {
   AccountStatus,
   BillingPeriod,
@@ -14,7 +15,7 @@ import type {
 
 /** FR-019: overdue once today is past due date + grace days and a balance remains. */
 export function isOverdue(period: BillingPeriod, state: PeriodState, today: ISODate, graceDays: number): boolean {
-  if (period.cancelled || state.balance <= 0) return false;
+  if (period.cancelled || state.balance <= 0 || isUpcoming(period, today)) return false;
   return today > addDays(period.dueDate, graceDays);
 }
 
@@ -28,6 +29,8 @@ export interface PeriodView {
   state: PeriodState;
   overdue: boolean;
   daysOverdue: number;
+  /** The month has not begun yet, so nothing is owed for it. */
+  upcoming: boolean;
 }
 
 export interface StudentAccount {
@@ -37,12 +40,14 @@ export interface StudentAccount {
   periods: PeriodView[];
   payments: Payment[];
   adjustments: CreditAdjustment[];
-  /** Sum of balances on unpaid / partially paid periods. */
+  /** Sum of balances on unpaid / partially paid periods that have begun. */
   outstanding: Lisente;
   /** Sum of balances on overdue periods. */
   arrears: Lisente;
   credit: Lisente;
-  /** outstanding − credit; negative means the family is ahead. */
+  /** Paid towards months that have not begun yet. */
+  prepaid: Lisente;
+  /** outstanding − credit − prepaid; negative means the family is ahead. */
   net: Lisente;
   status: AccountStatus;
   maxDaysOverdue: number;
@@ -75,14 +80,20 @@ export function buildStudentAccount(args: {
         state,
         overdue: isOverdue(period, state, today, settings.graceDays),
         daysOverdue: daysOverdue(period, state, today, settings.graceDays),
+        upcoming: isUpcoming(period, today),
       };
     })
     .sort((a, b) => (a.period.periodStart < b.period.periodStart ? 1 : -1));
 
   let outstanding = 0;
   let arrears = 0;
+  let prepaid = 0;
   let maxDays = 0;
   for (const v of views) {
+    if (v.upcoming) {
+      prepaid += v.state.amountRecorded;
+      continue;
+    }
     if (v.state.status === 'unpaid' || v.state.status === 'partial') outstanding += v.state.balance;
     if (v.overdue) {
       arrears += v.state.balance;
@@ -99,8 +110,9 @@ export function buildStudentAccount(args: {
     outstanding,
     arrears,
     credit: ledger.credit,
-    net: outstanding - ledger.credit,
-    status: accountStatusFor(arrears, ledger.credit),
+    prepaid,
+    net: outstanding - ledger.credit - prepaid,
+    status: accountStatusFor(arrears, ledger.credit + prepaid),
     maxDaysOverdue: maxDays,
     hasProvisionalPeriods: periods.some((p) => p.origin === 'provisional'),
   };

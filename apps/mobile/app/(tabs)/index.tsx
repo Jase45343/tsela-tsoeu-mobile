@@ -5,7 +5,7 @@ import { compareByUrgency, currentMonth, formatMaloti, formatMonth, summarizeMon
 import { useMemo } from 'react';
 import { useApp } from '../../src/data/AppContext';
 import { useT } from '../../src/lib/i18n';
-import { Btn, Divider, Figure, ListRow, Screen, SectionTitle, Sheet, StatusTag, Txt } from '../../src/ui/kit';
+import { Banner, Btn, Divider, Figure, ListRow, Screen, SectionTitle, Sheet, StatusTag, Txt } from '../../src/ui/kit';
 import { SyncLine } from '../../src/ui/SyncLine';
 import { color, space } from '../../src/ui/theme';
 
@@ -28,6 +28,9 @@ export default function Home() {
           <Txt tone={color.inkSoft}>{app.settings.businessName || app.profile?.name}</Txt>
         </View>
         <SyncLine />
+        {app.toReview.length ? (
+          <Banner tone="warn" icon="calendar-alert" text={t('reviewBanner', { n: app.toReview.length })} action={{ label: t('reviewTitle'), onPress: () => router.push('/review') }} />
+        ) : null}
 
         <Sheet>
           <Txt bold>{t('studentsCount', { n: s.activeStudents })}</Txt>

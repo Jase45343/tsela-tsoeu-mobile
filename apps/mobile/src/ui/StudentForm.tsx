@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { View } from 'react-native';
 import {
-  firstPeriodAmount, formatMaloti, formatMonth, normalizeLesothoPhone, parseAmount, parts, suggestFirstPeriodChoice, toInputString,
-  type FirstPeriodChoice, type ISODate, type Lisente, type Student,
+  defaultFirstChoice, firstMonthCharge, formatMaloti, formatMonth, normalizeLesothoPhone, parseAmount, parts, toInputString,
+  type BillingRules, type FirstPeriodChoice, type ISODate, type Lisente, type Student,
 } from '@busledger/core';
 import { useT } from '../lib/i18n';
 import { Banner, Btn, Chip, ChipRow, DateChooser, Field, Screen, Txt } from './kit';
@@ -15,7 +15,7 @@ export interface StudentFormValue {
 }
 
 /** FR-004 and FR-005. When `existing` is given, the onboarding fields are hidden (FR-006). */
-export function StudentForm({ existing, today, onSave }: { existing?: Student; today: ISODate; onSave: (v: StudentFormValue) => Promise<void> }) {
+export function StudentForm({ existing, today, rules, onSave }: { existing?: Student; today: ISODate; rules: BillingRules; onSave: (v: StudentFormValue) => Promise<void> }) {
   const { t, lang } = useT();
   const [name, setName] = useState(existing?.name ?? '');
   const [parentName, setParentName] = useState(existing?.parentName ?? '');
@@ -33,7 +33,8 @@ export function StudentForm({ existing, today, onSave }: { existing?: Student; t
 
   const fee = feeText.trim() === '0' ? 0 : parseAmount(feeText);
   const normalized = normalizeLesothoPhone(phone);
-  const suggested = suggestFirstPeriodChoice(start);
+  // The driver's first-month rule picks the default; they can still choose differently for this student.
+  const suggested = defaultFirstChoice(start, rules);
   const effectiveChoice = choice ?? suggested;
   const custom = effectiveChoice === 'custom' ? (customText.trim() === '0' ? 0 : parseAmount(customText)) : undefined;
   const { year, month } = parts(start);
@@ -57,8 +58,10 @@ export function StudentForm({ existing, today, onSave }: { existing?: Student; t
   };
 
   const choices: { c: FirstPeriodChoice; label: string }[] = [
-    { c: 'full', label: t('choiceFull') }, { c: 'half', label: t('choiceHalf') }, { c: 'free', label: t('choiceFree') }, { c: 'custom', label: t('choiceCustom') },
+    { c: 'full', label: t('choiceFull') }, { c: 'half', label: t('choiceHalf') }, { c: 'prorata', label: t('choiceProrata') },
+    { c: 'free', label: t('choiceFree') }, { c: 'custom', label: t('choiceCustom') },
   ];
+  const amountFor = (c: FirstPeriodChoice) => (fee === null || c === 'custom' ? null : firstMonthCharge(fee, start, school, rules, c).amountDue);
 
   return (
     <Screen footer={<Btn kind="secondary" icon="content-save" label={t('saveStudent')} onPress={save} busy={busy} />}>
@@ -81,7 +84,7 @@ export function StudentForm({ existing, today, onSave }: { existing?: Student; t
             <ChipRow>
               {choices.map(({ c, label }) => (
                 <Chip key={c} selected={effectiveChoice === c} onPress={() => setChoice(c)}
-                  label={`${label}${c !== 'custom' && fee !== null ? ` ${formatMaloti(firstPeriodAmount(fee, c))}` : ''}${c === suggested ? ` (${t('suggested')})` : ''}`} />
+                  label={`${label}${amountFor(c) !== null ? ` ${formatMaloti(amountFor(c)!)}` : ''}${c === suggested ? ` (${t('suggested')})` : ''}`} />
               ))}
             </ChipRow>
             {effectiveChoice === 'custom' ? (

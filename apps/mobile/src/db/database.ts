@@ -45,6 +45,10 @@ const MIGRATIONS: string[] = [
      balance_as_of TEXT NOT NULL, balance_provisional INTEGER NOT NULL, generated_at TEXT NOT NULL, shared_via TEXT,
      rev INTEGER NOT NULL DEFAULT 1, sync_status TEXT NOT NULL, sync_error TEXT);
    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  // v1.4: holiday months the driver must decide, and logged changes to a month's charge.
+  `ALTER TABLE periods ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE periods ADD COLUMN charge_note TEXT;
+   ALTER TABLE periods ADD COLUMN adjust_reason TEXT;`,
 ];
 
 let opening: Promise<DB> | null = null;

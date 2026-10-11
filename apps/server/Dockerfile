@@ -12,8 +12,9 @@ RUN npm run build -w @busledger/server
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
-COPY apps/server/package.json ./
-RUN npm install --omit=dev --ignore-scripts fastify @fastify/jwt @fastify/rate-limit pg zod
+# The build bundles the shared core into dist/main.js; only third-party runtime packages are needed here.
+RUN echo '{"name":"bus-ledger-api","private":true,"type":"module"}' > package.json \
+ && npm install --omit=dev --ignore-scripts fastify@^5.12.5 @fastify/jwt@^10.2.2 @fastify/rate-limit@^10.0.0 pg@^8.23.1 zod@^4.6.5
 COPY --from=build /repo/apps/server/dist ./dist
 USER node
 EXPOSE 8080

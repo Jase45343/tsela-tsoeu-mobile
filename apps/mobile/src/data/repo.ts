@@ -49,6 +49,7 @@ export const rowToStudent = (r: Row): Student => ({
 export const rowToPeriod = (r: Row): BillingPeriod => ({
   id: r.id, studentId: r.student_id, year: r.year, month: r.month, periodStart: r.period_start, periodEnd: r.period_end,
   dueDate: r.due_date, amountDue: r.amount_due, cancelled: b(r.cancelled), origin: r.origin,
+  needsReview: b(r.needs_review), chargeNote: r.charge_note ?? null,
 });
 export const rowToPayment = (r: Row): LocalPayment => ({
   id: r.id, studentId: r.student_id, amount: r.amount, method: r.method, paymentDate: r.payment_date,
@@ -106,14 +107,23 @@ export async function saveStudent(db: DB, s: Student): Promise<void> {
 
 export async function insertPeriod(db: DB, p: BillingPeriod, status: SyncStatus): Promise<void> {
   await db.runAsync(
-    `INSERT OR IGNORE INTO periods (id, student_id, year, month, period_start, period_end, due_date, amount_due, cancelled, origin, rev, sync_status)
-     VALUES (?,?,?,?,?,?,?,?,?,?,1,?)`,
-    [p.id, p.studentId, p.year, p.month, p.periodStart, p.periodEnd, p.dueDate, p.amountDue, p.cancelled ? 1 : 0, p.origin, status],
+    `INSERT OR IGNORE INTO periods (id, student_id, year, month, period_start, period_end, due_date, amount_due, cancelled, origin, needs_review, charge_note, rev, sync_status)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?)`,
+    [p.id, p.studentId, p.year, p.month, p.periodStart, p.periodEnd, p.dueDate, p.amountDue, p.cancelled ? 1 : 0, p.origin,
+      p.needsReview ? 1 : 0, p.chargeNote ?? null, status],
   );
 }
 
 export async function setPeriodCancelled(db: DB, id: string, cancelled: boolean): Promise<void> {
   await db.runAsync(`UPDATE periods SET cancelled = ?, rev = rev + 1, sync_status = 'pending', sync_error = NULL WHERE id = ?`, [cancelled ? 1 : 0, id]);
+}
+
+/** A month's charge changed by the driver; the reason is sent to the server and logged. */
+export async function setPeriodAmount(db: DB, id: string, amount: number, reason: string): Promise<void> {
+  await db.runAsync(
+    `UPDATE periods SET amount_due = ?, adjust_reason = ?, charge_note = ?, needs_review = 0, rev = rev + 1, sync_status = 'pending', sync_error = NULL WHERE id = ?`,
+    [amount, reason, reason, id],
+  );
 }
 
 export async function insertPayment(db: DB, p: LocalPayment): Promise<void> {

@@ -12,7 +12,7 @@ export default function EditStudent() {
   return (
     <>
       <Stack.Screen options={{ title: t('edit') }} />
-      <StudentForm existing={student} today={app.today} onSave={async (v) => {
+      <StudentForm existing={student} today={app.today} rules={app.settings} onSave={async (v) => {
         await app.updateStudent({ ...student, ...v.student, onboardedAt: student.onboardedAt });
         router.back();
       }} />

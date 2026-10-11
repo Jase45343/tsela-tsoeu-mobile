@@ -157,7 +157,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
          ON CONFLICT (user_id) DO UPDATE SET code_hash = EXCLUDED.code_hash, expires_at = EXCLUDED.expires_at, attempts = 0`,
         [u.id, sha256(code), expires],
       );
-      await sms.send(phone, `Bus Ledger PIN reset code: ${code}. It expires in ${RESET_TTL_MINUTES} minutes.`);
+      await sms.send(phone, `Tsela-Tšoeu PIN reset code: ${code}. It expires in ${RESET_TTL_MINUTES} minutes.`);
     }
     // Same answer either way, so the endpoint does not reveal which numbers have accounts.
     return reply.status(202).send({ ok: true });
@@ -207,14 +207,18 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   app.put('/v1/settings', async (req) => {
     const userId = await requireUser(req);
     const b = body(SettingsBody, req.body);
-    // Due day and grace days apply to periods generated from now on; past periods keep their dates.
+    // Rules apply to months generated from now on; months already charged keep their amounts and dates.
     await db.query(
       `UPDATE users SET name = COALESCE($2, name), business_name = COALESCE($3, business_name),
          email = CASE WHEN $4::boolean THEN $5 ELSE email END,
          due_day = COALESCE($6, due_day), grace_days = COALESCE($7, grace_days),
-         payment_methods = COALESCE($8::jsonb, payment_methods), server_seq = nextval('change_seq') WHERE id = $1`,
+         payment_methods = COALESCE($8::jsonb, payment_methods),
+         first_month_rule = COALESCE($9, first_month_rule), half_cutoff_day = COALESCE($10, half_cutoff_day),
+         holiday_rule = COALESCE($11, holiday_rule), school_closures = COALESCE($12::jsonb, school_closures),
+         server_seq = nextval('change_seq') WHERE id = $1`,
       [userId, b.name ?? null, b.businessName ?? null, b.email !== undefined, b.email ?? null, b.dueDay ?? null, b.graceDays ?? null,
-        b.paymentMethods ? JSON.stringify(b.paymentMethods) : null],
+        b.paymentMethods ? JSON.stringify(b.paymentMethods) : null, b.firstMonthRule ?? null, b.halfCutoffDay ?? null,
+        b.holidayRule ?? null, b.schoolClosures ? JSON.stringify(b.schoolClosures) : null],
     );
     return publicUser(userId);
   });

@@ -1,4 +1,6 @@
-# Bus Ledger
+# Tsela-Tšoeu
+
+*School transport management* (formerly "Bus Ledger"; internal package names still use `@busledger/*`).
 
 Record-keeping for school bus operators in Lesotho, built to **SRS v1.3, Phase 1**.
 The app records payments received outside it (cash, M-Pesa, EcoCash, bank) and keeps the books.
@@ -80,6 +82,23 @@ PIN reset codes are printed in the server log in development (see "SMS" below).
 | Phone sync engine (FR-032, FR-033) | `apps/mobile/src/sync/engine.ts` |
 | Idle PIN lock (FR-002) | `apps/mobile/src/ui/LockScreen.tsx`, `src/data/AppContext.tsx` |
 | ≤ 4-tap recording with inline review (FR-014, NFR-001) | `apps/mobile/app/record.tsx` |
+
+## Billing rules (v1.4)
+
+Each driver sets these in **Settings → Billing rules**. They apply to months created afterwards;
+months already charged never change unless the driver changes one by hand.
+
+| Setting | Options | Default |
+|---|---|---|
+| First month for a new student | Always the full fee · I choose each time · Half fee from a set day · Only the school days left | Always the full fee |
+| Months with school holidays | Same fee every month · Charge by days the bus runs · Full fee if the bus runs half the month or more, otherwise I decide | Same fee every month |
+| School holidays | Closed dates per school, or for all schools | none |
+
+- A new student's first payment falls due on their start date; months that have not begun are not owed.
+- School days are Monday to Friday, minus the school's closed dates. By-days amounts round to whole maloti.
+- "Otherwise I decide" months show on the home screen as **Months to decide**, grouped by school.
+- Any month's charge can be changed by hand with a reason; the change is audited on the server.
+- Code: `packages/core/src/charges.ts`, `apps/server/migrations/002_billing_rules.sql`, `apps/mobile/app/billing.tsx`, `review.tsx`, `charge.tsx`.
 
 ## Decisions made while building
 

@@ -28,6 +28,21 @@ export const SettingsBody = z.object({
   dueDay: z.number().int().min(1).max(28).optional(),
   graceDays: z.number().int().min(0).max(60).optional(),
   paymentMethods: z.array(z.string().trim().min(1).max(40)).min(1).max(12).optional(),
+  firstMonthRule: z.enum(['full', 'ask', 'half_after', 'prorata']).optional(),
+  halfCutoffDay: z.number().int().min(2).max(28).optional(),
+  holidayRule: z.enum(['same', 'by_days', 'half_or_ask']).optional(),
+  schoolClosures: z
+    .array(
+      z.object({
+        id: uuid,
+        school: z.string().trim().min(1).max(120).nullable(),
+        from: isoDate,
+        to: isoDate,
+        label: z.string().trim().max(60).default(''),
+      }).refine((c) => c.from <= c.to, 'A closure must end on or after the day it starts'),
+    )
+    .max(200)
+    .optional(),
 });
 
 export const StudentDTO = z.object({
@@ -51,6 +66,8 @@ export const PeriodPush = z.object({
   amountDue: lisente,
   cancelled: z.boolean(),
   origin: z.enum(['server', 'onboarding', 'provisional']),
+  /** Required when the driver changes a month's charge by hand. */
+  adjustReason: z.string().trim().min(1).max(200).nullable().optional(),
 });
 
 export const PaymentDTO = z.object({

@@ -5,8 +5,10 @@ import {
   buildBook,
   buildPeriod,
   buildStudentAccount,
+  DEFAULT_BILLING_RULES,
   DEFAULT_PAYMENT_METHODS,
-  firstPeriodAmount,
+  firstDueDate,
+  firstMonthCharge,
   formatAckNumber,
   parts,
   periodsToGenerate,
@@ -46,12 +48,24 @@ export interface PaymentInput {
   note?: string;
 }
 
-interface AuthUser { id: string; name: string; phone: string; businessName: string; dueDay: number; graceDays: number; paymentMethods: string[] }
+type AuthUser = RemoteSettings & { id: string; name: string; phone: string };
 interface AuthResponse { token: string; user: AuthUser }
 
 const DAY = 86_400_000;
 const EMPTY: Snapshot = { students: [], periods: [], payments: [], adjustments: [], acks: [], sync: [] };
-const DEFAULT_SETTINGS: RemoteSettings = { businessName: '', dueDay: 1, graceDays: 7, paymentMethods: [...DEFAULT_PAYMENT_METHODS] };
+const DEFAULT_SETTINGS: RemoteSettings = { businessName: '', dueDay: 1, graceDays: 7, paymentMethods: [...DEFAULT_PAYMENT_METHODS], ...DEFAULT_BILLING_RULES };
+
+/** Settings as the server returns them, with defaults for anything an older server omits. */
+const toRemote = (u: Partial<RemoteSettings>): RemoteSettings => ({
+  businessName: u.businessName ?? '',
+  dueDay: u.dueDay ?? DEFAULT_SETTINGS.dueDay,
+  graceDays: u.graceDays ?? DEFAULT_SETTINGS.graceDays,
+  paymentMethods: u.paymentMethods ?? DEFAULT_SETTINGS.paymentMethods,
+  firstMonthRule: u.firstMonthRule ?? DEFAULT_BILLING_RULES.firstMonthRule,
+  halfCutoffDay: u.halfCutoffDay ?? DEFAULT_BILLING_RULES.halfCutoffDay,
+  holidayRule: u.holidayRule ?? DEFAULT_BILLING_RULES.holidayRule,
+  closures: u.closures ?? [],
+});
 
 function useAppState() {
   const dbRef = useRef<DB | null>(null);
@@ -87,11 +101,11 @@ function useAppState() {
     let snap = await repo.loadSnapshot(d);
     const now = todayInMaseru();
     setToday(now);
-    const missing = periodsToGenerate(snap.students, snap.periods, now);
+    const missing = periodsToGenerate(snap.students, snap.periods, now, settingsRef.current);
     if (missing.length) {
       for (const m of missing) {
         const p = buildPeriod({ id: randomUUID(), studentId: m.studentId, year: m.year, month: m.month, amountDue: m.amountDue, dueDay: settingsRef.current.dueDay, origin: 'provisional' });
-        await repo.insertPeriod(d, p, 'local');
+        await repo.insertPeriod(d, { ...p, needsReview: m.needsReview, chargeNote: m.chargeNote }, 'local');
       }
       snap = await repo.loadSnapshot(d);
     }
@@ -109,7 +123,7 @@ function useAppState() {
     try {
       const res = await runSync(d, token, deviceId);
       await setToken(res.token);
-      setSettings(res.settings);
+      setSettings(toRemote(res.settings));
       setLastSyncAt(new Date().toISOString());
       setSyncProblem(null);
       setSyncMessage(null);
@@ -144,7 +158,7 @@ function useAppState() {
         getMeta(d, 'lock_minutes'), getMeta(d, 'last_method'), getToken(),
       ]);
       if (!alive) return;
-      if (s) setSettings(JSON.parse(s));
+      if (s) setSettings(toRemote(JSON.parse(s)));
       if (l === 'st' || l === 'en') setLangState(l);
       setLastSyncAt(ls);
       if (lm) setLockMinutesState(Number(lm));
@@ -188,7 +202,7 @@ function useAppState() {
     if (!deviceId) deviceId = randomUUID();
     const dev = await api<{ deviceId: string; ackPrefix: string }>('/v1/devices', { body: { id: deviceId, name: 'Android' }, token: res.token });
     const prof: Profile = { userId: res.user.id, name: res.user.name, phone: res.user.phone, deviceId, ackPrefix: dev.ackPrefix };
-    const remote: RemoteSettings = { businessName: res.user.businessName, dueDay: res.user.dueDay, graceDays: res.user.graceDays, paymentMethods: res.user.paymentMethods };
+    const remote = toRemote(res.user);
     await setMeta(d, 'user_id', res.user.id);
     await setMeta(d, 'device_id', deviceId);
     await setMeta(d, 'profile', JSON.stringify(prof));
@@ -251,6 +265,12 @@ function useAppState() {
     return s;
   }, [snapshot.sync, accounts]);
 
+  /** Holiday months the driver's rule leaves for them to decide (synced months only). */
+  const toReview = useMemo(
+    () => accounts.flatMap((a) => a.periods.filter((v) => v.period.needsReview && !v.period.cancelled && v.period.origin !== 'provisional').map((v) => ({ account: a, view: v }))),
+    [accounts],
+  );
+
   const pendingCount = snapshot.sync.filter((i) => i.status === 'pending').length;
   const failedCount = snapshot.sync.filter((i) => i.status === 'failed').length;
   const daysSinceSync = lastSyncAt ? Math.floor((Date.now() - Date.parse(lastSyncAt)) / DAY) : null;
@@ -265,17 +285,17 @@ function useAppState() {
     const d = db();
     const student: Student = { ...s, id: randomUUID(), status: 'active' };
     const { year, month } = parts(student.onboardedAt);
-    const first = buildPeriod({
-      id: randomUUID(), studentId: student.id, year, month,
-      amountDue: firstPeriodAmount(student.monthlyFee, choice, custom), dueDay: settings.dueDay, origin: 'onboarding',
-    });
+    const charge = firstMonthCharge(student.monthlyFee, student.onboardedAt, student.school, settings, choice, custom);
+    const base = buildPeriod({ id: randomUUID(), studentId: student.id, year, month, amountDue: charge.amountDue, dueDay: settings.dueDay, origin: 'onboarding' });
+    // The first payment falls due on the day the student starts.
+    const first = { ...base, dueDate: firstDueDate(base.dueDate, student.onboardedAt), chargeNote: charge.note };
     await d.withTransactionAsync(async () => { const tx = d;
       await repo.saveStudent(tx, student);
       await repo.insertPeriod(tx, first, 'pending');
     });
     await afterWrite();
     return student.id;
-  }, [afterWrite, settings.dueDay]);
+  }, [afterWrite, settings]);
 
   const updateStudent = useCallback(async (s: Student) => {
     await repo.saveStudent(db(), s);
@@ -284,6 +304,20 @@ function useAppState() {
 
   const setPeriodCancelled = useCallback(async (periodId: string, cancelled: boolean) => {
     await repo.setPeriodCancelled(db(), periodId, cancelled);
+    await afterWrite();
+  }, [afterWrite]);
+
+  /** Change one month's charge by hand. The reason is kept and logged on the server. */
+  const adjustCharge = useCallback(async (periodId: string, amount: Lisente, reason: string) => {
+    await repo.setPeriodAmount(db(), periodId, amount, reason);
+    await afterWrite();
+  }, [afterWrite]);
+
+  const adjustCharges = useCallback(async (changes: { periodId: string; amount: Lisente }[], reason: string) => {
+    const d = db();
+    await d.withTransactionAsync(async () => {
+      for (const c of changes) await repo.setPeriodAmount(d, c.periodId, c.amount, reason);
+    });
     await afterWrite();
   }, [afterWrite]);
 
@@ -369,8 +403,9 @@ function useAppState() {
 
   const updateRemoteSettings = useCallback(async (patch: Partial<RemoteSettings> & { name?: string }) => {
     const token = await getToken();
-    const res = await api<AuthUser>('/v1/settings', { method: 'PUT', body: patch, token });
-    const next: RemoteSettings = { businessName: res.businessName, dueDay: res.dueDay, graceDays: res.graceDays, paymentMethods: res.paymentMethods };
+    const { closures, ...rest } = patch;
+    const res = await api<AuthUser>('/v1/settings', { method: 'PUT', body: closures ? { ...rest, schoolClosures: closures } : rest, token });
+    const next = toRemote(res);
     await setMeta(db(), 'settings', JSON.stringify(next));
     setSettings(next);
     if (profile && res.name !== profile.name) {
@@ -387,10 +422,10 @@ function useAppState() {
 
   return {
     status, lang, setLang, profile, settings, today, lastMethod, lockMinutes, setLockMinutes,
-    snapshot, accounts, accountById, unsyncedStudents,
+    snapshot, accounts, accountById, unsyncedStudents, toReview,
     sync, syncing, syncProblem, syncMessage, lastSyncAt, daysSinceSync, pendingCount, failedCount, retryFailed,
     register, login, requestReset, confirmReset, unlock, signOut, closeAccount, updateRemoteSettings,
-    addStudent, updateStudent, setPeriodCancelled, recordPayment, voidPayment, correctPayment, addCreditAdjustment, markAckShared,
+    addStudent, updateStudent, setPeriodCancelled, adjustCharge, adjustCharges, recordPayment, voidPayment, correctPayment, addCreditAdjustment, markAckShared,
   };
 }
 

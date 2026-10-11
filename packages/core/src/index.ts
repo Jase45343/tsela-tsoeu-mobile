@@ -3,6 +3,7 @@ export * from './dates';
 export * from './money';
 export * from './phone';
 export * from './periods';
+export * from './charges';
 export * from './allocation';
 export * from './accounts';
 export * from './reports';

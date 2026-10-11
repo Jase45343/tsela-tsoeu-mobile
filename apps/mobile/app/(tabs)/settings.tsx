@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import Constants from 'expo-constants';
 import { useApp } from '../../src/data/AppContext';
 import { useT } from '../../src/lib/i18n';
-import { Banner, Btn, Chip, ChipRow, Field, ListRow, Screen, SectionTitle, Sheet, Txt } from '../../src/ui/kit';
+import { Banner, Btn, Chip, ChipRow, Divider, Field, ListRow, Screen, SectionTitle, Sheet, Txt } from '../../src/ui/kit';
 import { color, space } from '../../src/ui/theme';
 
 /** NFR-010: operator settings without a code release; FR-037 account closure. */
@@ -62,6 +62,8 @@ export default function Settings() {
   return (
     <Screen>
       <Sheet style={{ padding: 0, gap: 0, overflow: 'hidden' }}>
+        <ListRow title={t('billingRules')} subtitle={`${t(({ full: 'fmFull', ask: 'fmAsk', half_after: 'fmHalf', prorata: 'fmProrata' } as const)[app.settings.firstMonthRule])} · ${t(({ same: 'hrSame', by_days: 'hrByDays', half_or_ask: 'hrHalfOrAsk' } as const)[app.settings.holidayRule])}`} onPress={() => router.push('/billing')} />
+        <Divider />
         <ListRow title={t('syncStatus')} subtitle={app.failedCount ? t('failedCount', { n: app.failedCount }) : app.pendingCount ? t('pendingCount', { n: app.pendingCount }) : t('allSynced')} onPress={() => router.push('/sync')} />
       </Sheet>
 
