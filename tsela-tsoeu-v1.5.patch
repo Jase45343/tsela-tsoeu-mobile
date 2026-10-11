@@ -1,0 +1,1116 @@
+diff --git a/README.md b/README.md
+index 3c6c509..d818237 100644
+--- a/README.md
++++ b/README.md
+@@ -100,6 +100,14 @@ months already charged never change unless the driver changes one by hand.
+ - Any month's charge can be changed by hand with a reason; the change is audited on the server.
+ - Code: `packages/core/src/charges.ts`, `apps/server/migrations/002_billing_rules.sql`, `apps/mobile/app/billing.tsx`, `review.tsx`, `charge.tsx`.
+ 
++## Paid ahead and write-offs (v1.5)
++
++- Money paid beyond what is owed is **paid ahead**: it pays the coming months automatically. The app never calls it "credit".
++- Paid-ahead money can only be **returned to the parent** (recorded with a note). It cannot be written off.
++- **Write off what's owed** forgives one month's debt with a reason. It is stored as a non-cash record (`source = 'write_off'`,
++  `write_off_period_id`), applied before cash, never becomes paid-ahead money, is excluded from cash received and daily
++  reports, and is undone by voiding it. Code: `packages/core/src/allocation.ts`, `apps/server/migrations/003_write_offs.sql`.
++
+ ## Decisions made while building
+ 
+ - **Payments are immutable.** A wrong record is voided, or voided and replaced by a correction
+diff --git a/apps/mobile/app/(tabs)/index.tsx b/apps/mobile/app/(tabs)/index.tsx
+index 4e64a88..a98a185 100644
+--- a/apps/mobile/app/(tabs)/index.tsx
++++ b/apps/mobile/app/(tabs)/index.tsx
+@@ -50,7 +50,7 @@ export default function Home() {
+           <Figure label={t('arrearsEarlier')} value={formatMaloti(s.arrearsEarlier)} tone={s.arrearsEarlier > 0 ? color.owing : color.ink} />
+           <View style={{ flexDirection: 'row', gap: space.lg }}>
+             <View style={{ flex: 1 }}><Figure label={t('receivedIn', { month: monthLabel })} value={formatMaloti(s.received)} /></View>
+-            <View style={{ flex: 1 }}><Figure label={t('creditHeld')} value={formatMaloti(s.totalCredit)} /></View>
++            <View style={{ flex: 1 }}><Figure label={t('paidAheadTotal')} value={formatMaloti(s.totalPaidAhead)} /></View>
+           </View>
+           {star ? <Txt variant="small" tone={color.inkSoft}>{t('provisionalNote')}</Txt> : null}
+         </Sheet>
+diff --git a/apps/mobile/app/(tabs)/reports.tsx b/apps/mobile/app/(tabs)/reports.tsx
+index fe40805..ebc70e5 100644
+--- a/apps/mobile/app/(tabs)/reports.tsx
++++ b/apps/mobile/app/(tabs)/reports.tsx
+@@ -74,7 +74,8 @@ export default function Reports() {
+             <Figure label={t('recordedFor', { month: formatMonth(ym.year, ym.month, lang) })} value={formatMaloti(monthly.recorded)} />
+             <Figure label={t('outstandingFor', { month: formatMonth(ym.year, ym.month, lang) })} value={formatMaloti(monthly.outstanding)} tone={monthly.outstanding ? color.owing : color.paid} />
+             <Figure label={t('receivedIn', { month: formatMonth(ym.year, ym.month, lang) })} value={formatMaloti(monthly.received)} />
+-            {monthly.creditAdjustmentsCount ? <Figure label={t('exportCredit')} value={formatMaloti(monthly.creditAdjustmentsTotal)} /> : null}
++            {monthly.writtenOff ? <Figure label={t('writtenOff')} value={formatMaloti(monthly.writtenOff)} /> : null}
++            {monthly.creditAdjustmentsCount ? <Figure label={t('exportReturned')} value={formatMaloti(monthly.creditAdjustmentsTotal)} /> : null}
+           </Sheet>
+         </>
+       )}
+@@ -98,7 +99,7 @@ export default function Reports() {
+       <View style={{ gap: space.sm }}>
+         <Btn kind="secondary" icon="file-delimited-outline" label={t('exportPayments')} onPress={() => void shareCsv('payments', app.accounts)} />
+         <Btn kind="secondary" icon="file-delimited-outline" label={t('exportStudents')} onPress={() => void shareCsv('students', app.accounts)} />
+-        <Btn kind="secondary" icon="file-delimited-outline" label={t('exportCredit')} onPress={() => void shareCsv('credit', app.accounts)} />
++        <Btn kind="secondary" icon="file-delimited-outline" label={t('exportReturned')} onPress={() => void shareCsv('returned', app.accounts)} />
+       </View>
+     </Screen>
+   );
+diff --git a/apps/mobile/app/payment/[id].tsx b/apps/mobile/app/payment/[id].tsx
+index 7710cd3..dd9d541 100644
+--- a/apps/mobile/app/payment/[id].tsx
++++ b/apps/mobile/app/payment/[id].tsx
+@@ -51,6 +51,30 @@ export default function PaymentDetail() {
+     setVoiding(false);
+   };
+ 
++  if (payment.source === 'write_off') {
++    return (
++      <Screen>
++        <Stack.Screen options={{ title: t('writtenOff') }} />
++        {payment.voidedAt ? <Banner tone="danger" icon="cancel" text={`${t('voided')}: ${payment.voidReason ?? ''}`} /> : null}
++        <Sheet>
++          <Txt variant="heading" bold>{account.student.name}</Txt>
++          <Txt>{t('writtenOffAmount', { amount: formatMaloti(payment.amount) })} · {payment.writeOffPeriodId ? periodName(payment.writeOffPeriodId) : ''}</Txt>
++          <Txt variant="small" tone={color.inkSoft}>{formatDateLong(payment.paymentDate, lang)} · {payment.note}</Txt>
++        </Sheet>
++        <Banner tone="info" text={t('writeOffNotCash')} />
++        {!payment.voidedAt ? (
++          voiding ? (
++            <Sheet>
++              <Field label={t('undoReason')} value={reason} onChangeText={setReason} autoFocus />
++              <Btn kind="danger" label={t('undoWriteOff')} onPress={doVoid} busy={busy} disabled={!reason.trim()} />
++              <Btn kind="quiet" label={t('cancel')} onPress={() => setVoiding(false)} />
++            </Sheet>
++          ) : <Btn kind="secondary" icon="undo" label={t('undoWriteOff')} onPress={() => setVoiding(true)} />
++        ) : null}
++      </Screen>
++    );
++  }
++
+   return (
+     <Screen footer={isNew ? <Btn kind="secondary" label={t('done')} onPress={() => router.dismissTo('/')} /> : undefined}>
+       <Stack.Screen options={{ title: ack?.number ?? t('kindPayment') }} />
+@@ -90,7 +114,7 @@ export default function PaymentDetail() {
+             ))}
+             {allocations.filter((a) => a.target === 'adjustment').map((a) => (
+               <View key={a.targetId} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+-                <Txt>{t('creditAdjustmentLabel')}</Txt><Txt bold>{formatMaloti(a.amount)}</Txt>
++                <Txt>{t('returnedToParent')}</Txt><Txt bold>{formatMaloti(a.amount)}</Txt>
+               </View>
+             ))}
+             {creditPart > 0 ? (
+diff --git a/apps/mobile/app/record.tsx b/apps/mobile/app/record.tsx
+index a4d3e39..ead57b4 100644
+--- a/apps/mobile/app/record.tsx
++++ b/apps/mobile/app/record.tsx
+@@ -39,7 +39,7 @@ export default function Record() {
+   // Recently paid first, so a returning student is one tap away.
+   const candidates = useMemo(() => {
+     const last = new Map<string, string>();
+-    for (const p of app.snapshot.payments) if ((last.get(p.studentId) ?? '') < p.createdAt) last.set(p.studentId, p.createdAt);
++    for (const p of app.snapshot.payments) if (p.source !== 'write_off' && (last.get(p.studentId) ?? '') < p.createdAt) last.set(p.studentId, p.createdAt);
+     return app.accounts
+       .filter((a) => a.student.status === 'active' && matchesStudent(a, query.trim()))
+       .sort((a, b) => (last.get(b.student.id) ?? '').localeCompare(last.get(a.student.id) ?? '') || a.student.name.localeCompare(b.student.name));
+diff --git a/apps/mobile/app/student/[id]/credit.tsx b/apps/mobile/app/student/[id]/credit.tsx
+deleted file mode 100644
+index 071225d..0000000
+--- a/apps/mobile/app/student/[id]/credit.tsx
++++ /dev/null
+@@ -1,50 +0,0 @@
+-import { useState } from 'react';
+-import { View } from 'react-native';
+-import { router, Stack, useLocalSearchParams } from 'expo-router';
+-import { formatMaloti, parseAmount, toInputString, type CreditAdjustmentType } from '@busledger/core';
+-import { useApp } from '../../../src/data/AppContext';
+-import { useT } from '../../../src/lib/i18n';
+-import { Btn, Chip, ChipRow, Field, Screen, Sheet, Txt } from '../../../src/ui/kit';
+-import { space } from '../../../src/ui/theme';
+-
+-/** FR-039: reduce a student's credit without voiding any payment. */
+-export default function SettleCredit() {
+-  const app = useApp();
+-  const { t } = useT();
+-  const { id } = useLocalSearchParams<{ id: string }>();
+-  const a = app.accountById.get(id);
+-  const [type, setType] = useState<CreditAdjustmentType>('refunded_outside_app');
+-  const [amountText, setAmountText] = useState(a ? toInputString(a.credit) : '');
+-  const [reason, setReason] = useState('');
+-  const [touched, setTouched] = useState(false);
+-  const [busy, setBusy] = useState(false);
+-  if (!a) return null;
+-
+-  const amount = parseAmount(amountText);
+-  const tooMuch = amount !== null && amount > a.credit;
+-  const save = async () => {
+-    setTouched(true);
+-    if (!amount || tooMuch || !reason.trim()) return;
+-    setBusy(true);
+-    await app.addCreditAdjustment(a.student.id, type, amount, reason.trim());
+-    router.back();
+-  };
+-
+-  return (
+-    <Screen footer={<Btn kind="secondary" label={t('saveAdjustment')} onPress={save} busy={busy} />}>
+-      <Stack.Screen options={{ title: t('settleCredit') }} />
+-      <Sheet><Txt variant="heading" bold>{t('available', { amount: formatMaloti(a.credit) })}</Txt></Sheet>
+-      <View style={{ gap: space.sm }}>
+-        <ChipRow>
+-          <Chip label={t('adjRefunded')} selected={type === 'refunded_outside_app'} onPress={() => setType('refunded_outside_app')} />
+-          <Chip label={t('adjWrittenOff')} selected={type === 'written_off'} onPress={() => setType('written_off')} />
+-          <Chip label={t('adjOther')} selected={type === 'other'} onPress={() => setType('other')} />
+-        </ChipRow>
+-      </View>
+-      <Field label={t('amount')} value={amountText} onChangeText={setAmountText} keyboardType="decimal-pad"
+-        error={touched && !amount ? t('amountInvalid') : tooMuch ? t('adjTooMuch') : null} />
+-      <Field label={t('adjReason')} value={reason} onChangeText={setReason} multiline error={touched && !reason.trim() ? t('required') : null} />
+-      <Txt variant="small">{t('notMoney')}</Txt>
+-    </Screen>
+-  );
+-}
+diff --git a/apps/mobile/app/student/[id]/index.tsx b/apps/mobile/app/student/[id]/index.tsx
+index 62e1d79..10bcbc5 100644
+--- a/apps/mobile/app/student/[id]/index.tsx
++++ b/apps/mobile/app/student/[id]/index.tsx
+@@ -50,12 +50,12 @@ export default function StudentAccountScreen() {
+       </Sheet>
+ 
+       {!active && a.credit > 0 ? (
+-        <Banner tone="warn" text={t('leftCreditPrompt', { name: s.name, amount: formatMaloti(a.credit) })} action={{ label: t('settleCredit'), onPress: () => router.push(`/student/${s.id}/credit`) }} />
++        <Banner tone="warn" text={t('leftPaidAheadPrompt', { name: s.name, amount: formatMaloti(a.credit) })} action={{ label: t('returnPaidAhead'), onPress: () => router.push(`/student/${s.id}/return`) }} />
+       ) : null}
+ 
+       <View style={{ gap: space.sm }}>
+         {a.net > 0 ? <Btn kind="secondary" icon="whatsapp" label={t('sendReminder')} onPress={() => router.push(`/student/${s.id}/remind`)} /> : null}
+-        {a.credit > 0 && active ? <Btn kind="secondary" icon="cash-refund" label={t('settleCredit')} onPress={() => router.push(`/student/${s.id}/credit`)} /> : null}
++        {a.credit > 0 && active ? <Btn kind="quiet" icon="cash-refund" label={t('returnPaidAhead')} onPress={() => router.push(`/student/${s.id}/return`)} /> : null}
+       </View>
+ 
+       <SectionTitle>{t('months')}</SectionTitle>
+@@ -70,6 +70,7 @@ export default function StudentAccountScreen() {
+                   : [
+                     t('recordedOf', { a: formatMaloti(v.state.amountRecorded), b: formatMaloti(v.period.amountDue) }),
+                     v.overdue ? t('daysOverdue', { n: v.daysOverdue }) : null,
++                    v.state.writtenOff ? t('writtenOffAmount', { amount: formatMaloti(v.state.writtenOff) }) : null,
+                     parseDays(v.period.chargeNote) ? t('daysRun', parseDays(v.period.chargeNote)!) : v.period.chargeNote,
+                     v.period.origin === 'provisional' ? t('notConfirmed') : null,
+                   ].filter(Boolean).join(' · ')
+@@ -86,6 +87,9 @@ export default function StudentAccountScreen() {
+                 {!v.period.cancelled ? (
+                   <Btn kind="secondary" icon="pencil" label={t('changeCharge')} onPress={() => { setOpen(null); router.push(`/charge?periodId=${v.period.id}`); }} />
+                 ) : null}
++                {!v.period.cancelled && !v.upcoming && v.state.balance > 0 ? (
++                  <Btn kind="secondary" icon="eraser" label={t('writeOff')} onPress={() => { setOpen(null); router.push(`/student/${s.id}/writeoff?periodId=${v.period.id}`); }} />
++                ) : null}
+                 <Btn kind={v.period.cancelled ? 'secondary' : 'danger'} label={v.period.cancelled ? t('chargeAgain') : t('dontCharge')}
+                   onPress={() => { setOpen(null); void app.setPeriodCancelled(v.period.id, !v.period.cancelled); }} />
+               </View>
+@@ -101,8 +105,10 @@ export default function StudentAccountScreen() {
+           <View key={p.id}>
+             {i ? <Divider /> : null}
+             <ListRow
+-              title={formatMaloti(p.amount)}
+-              subtitle={`${formatDateLong(p.paymentDate, lang)} · ${p.method}${p.acknowledgementNumber ? ` · ${p.acknowledgementNumber}` : ''}`}
++              title={p.source === 'write_off' ? t('writtenOffAmount', { amount: formatMaloti(p.amount) }) : formatMaloti(p.amount)}
++              subtitle={p.source === 'write_off'
++                ? `${formatDateLong(p.paymentDate, lang)} · ${p.note ?? ''}`
++                : `${formatDateLong(p.paymentDate, lang)} · ${p.method}${p.acknowledgementNumber ? ` · ${p.acknowledgementNumber}` : ''}`}
+               right={p.voidedAt ? <StatusTag tag="cancelled" label={t('voided')} /> : undefined}
+               onPress={() => router.push(`/payment/${p.id}`)}
+             />
+@@ -111,7 +117,7 @@ export default function StudentAccountScreen() {
+         {a.adjustments.map((adj) => (
+           <View key={adj.id}>
+             <Divider />
+-            <ListRow title={`− ${formatMaloti(adj.amount)}`} subtitle={`${t('creditAdjustmentLabel')} · ${adj.reason}`} />
++            <ListRow title={`− ${formatMaloti(adj.amount)}`} subtitle={`${adj.type === 'refunded_outside_app' ? t('returnedToParent') : t('writtenOff')} · ${adj.reason}`} />
+           </View>
+         ))}
+       </Sheet>
+diff --git a/apps/mobile/app/student/[id]/return.tsx b/apps/mobile/app/student/[id]/return.tsx
+new file mode 100644
+index 0000000..c981239
+--- /dev/null
++++ b/apps/mobile/app/student/[id]/return.tsx
+@@ -0,0 +1,48 @@
++import { useState } from 'react';
++import { router, Stack, useLocalSearchParams } from 'expo-router';
++import { formatMaloti, parseAmount, toInputString } from '@busledger/core';
++import { useApp } from '../../../src/data/AppContext';
++import { useT } from '../../../src/lib/i18n';
++import { Banner, Btn, Field, Screen, Sheet, Txt } from '../../../src/ui/kit';
++import { color } from '../../../src/ui/theme';
++
++/**
++ * FR-039: record paid-ahead money the driver gave back to the parent.
++ * Paid-ahead money the driver keeps needs no action: it pays the coming months automatically.
++ */
++export default function ReturnPaidAhead() {
++  const app = useApp();
++  const { t } = useT();
++  const { id } = useLocalSearchParams<{ id: string }>();
++  const a = app.accountById.get(id);
++  const [amountText, setAmountText] = useState(a ? toInputString(a.credit) : '');
++  const [note, setNote] = useState('');
++  const [touched, setTouched] = useState(false);
++  const [busy, setBusy] = useState(false);
++  if (!a) return null;
++
++  const amount = parseAmount(amountText);
++  const tooMuch = amount !== null && amount > a.credit;
++  const save = async () => {
++    setTouched(true);
++    if (!amount || tooMuch || !note.trim()) return;
++    setBusy(true);
++    await app.returnPaidAhead(a.student.id, amount, note.trim());
++    router.back();
++  };
++
++  return (
++    <Screen footer={<Btn kind="primary" icon="cash-refund" label={t('saveReturn')} onPress={save} busy={busy} />}>
++      <Stack.Screen options={{ title: t('returnPaidAhead') }} />
++      <Sheet>
++        <Txt variant="heading" bold>{a.student.name}</Txt>
++        <Txt>{t('paidAheadAvailable', { amount: formatMaloti(a.credit) })}</Txt>
++      </Sheet>
++      <Txt tone={color.inkSoft}>{t('returnHint')}</Txt>
++      <Field label={t('amountReturned')} value={amountText} onChangeText={setAmountText} keyboardType="decimal-pad"
++        error={touched && !amount ? t('amountInvalid') : tooMuch ? t('returnTooMuch') : null} />
++      <Field label={t('returnNote')} value={note} onChangeText={setNote} multiline error={touched && !note.trim() ? t('required') : null} />
++      <Banner tone="info" text={t('notMoney')} />
++    </Screen>
++  );
++}
+diff --git a/apps/mobile/app/student/[id]/writeoff.tsx b/apps/mobile/app/student/[id]/writeoff.tsx
+new file mode 100644
+index 0000000..4746fbe
+--- /dev/null
++++ b/apps/mobile/app/student/[id]/writeoff.tsx
+@@ -0,0 +1,47 @@
++import { useState } from 'react';
++import { router, Stack, useLocalSearchParams } from 'expo-router';
++import { formatMaloti, formatMonth, parseAmount, toInputString } from '@busledger/core';
++import { useApp } from '../../../src/data/AppContext';
++import { useT } from '../../../src/lib/i18n';
++import { Btn, Field, Screen, Sheet, Txt } from '../../../src/ui/kit';
++import { color } from '../../../src/ui/theme';
++
++/** Forgive what a parent owes for one month. Logged with the reason; undone by voiding it from the payments list. */
++export default function WriteOff() {
++  const app = useApp();
++  const { t, lang } = useT();
++  const { id, periodId } = useLocalSearchParams<{ id: string; periodId: string }>();
++  const a = app.accountById.get(id);
++  const view = a?.periods.find((v) => v.period.id === periodId);
++  const [amountText, setAmountText] = useState(view ? toInputString(view.state.balance) : '');
++  const [reason, setReason] = useState('');
++  const [touched, setTouched] = useState(false);
++  const [busy, setBusy] = useState(false);
++  if (!a || !view) return null;
++
++  const owed = view.state.balance;
++  const month = formatMonth(view.period.year, view.period.month, lang);
++  const amount = parseAmount(amountText);
++  const tooMuch = amount !== null && amount > owed;
++  const save = async () => {
++    setTouched(true);
++    if (!amount || tooMuch || !reason.trim()) return;
++    setBusy(true);
++    await app.writeOff(view.period.id, amount, reason.trim());
++    router.back();
++  };
++
++  return (
++    <Screen footer={<Btn kind="danger" icon="eraser" label={t('saveWriteOff')} onPress={save} busy={busy} />}>
++      <Stack.Screen options={{ title: t('writeOff') }} />
++      <Sheet>
++        <Txt variant="heading" bold>{a.student.name}</Txt>
++        <Txt>{t('owedFor', { month, amount: formatMaloti(owed) })}</Txt>
++      </Sheet>
++      <Txt tone={color.inkSoft}>{t('writeOffHint')}</Txt>
++      <Field label={t('amountWrittenOff')} value={amountText} onChangeText={setAmountText} keyboardType="decimal-pad"
++        error={touched && !amount ? t('amountInvalid') : tooMuch ? t('writeOffTooMuch') : null} />
++      <Field label={t('writeOffReason')} value={reason} onChangeText={setReason} multiline error={touched && !reason.trim() ? t('required') : null} />
++    </Screen>
++  );
++}
+diff --git a/apps/mobile/src/data/AppContext.tsx b/apps/mobile/src/data/AppContext.tsx
+index 8b17bba..ca57082 100644
+--- a/apps/mobile/src/data/AppContext.tsx
++++ b/apps/mobile/src/data/AppContext.tsx
+@@ -13,7 +13,6 @@ import {
+   parts,
+   periodsToGenerate,
+   todayInMaseru,
+-  type CreditAdjustmentType,
+   type FirstPeriodChoice,
+   type ISODate,
+   type Lang,
+@@ -372,13 +371,27 @@ function useAppState() {
+     [writePayment],
+   );
+ 
+-  const addCreditAdjustment = useCallback(async (studentId: string, type: CreditAdjustmentType, amount: Lisente, reason: string) => {
++  /** FR-039: record paid-ahead money given back to the parent. */
++  const returnPaidAhead = useCallback(async (studentId: string, amount: Lisente, note: string) => {
+     const acc = accountById.get(studentId);
+-    if (!acc || amount > acc.credit) throw new Error('exceeds_credit');
+-    await repo.insertAdjustment(db(), { id: randomUUID(), studentId, type, amount, reason, createdAt: new Date().toISOString() });
++    if (!acc || amount > acc.credit) throw new Error('exceeds_paid_ahead');
++    await repo.insertAdjustment(db(), { id: randomUUID(), studentId, type: 'refunded_outside_app', amount, reason: note, createdAt: new Date().toISOString() });
+     await afterWrite();
+   }, [accountById, afterWrite]);
+ 
++  /** Forgive what is owed for one month. Not money received; undone by voiding it. */
++  const writeOff = useCallback(async (periodId: string, amount: Lisente, reason: string) => {
++    if (!profile) throw new Error('Not signed in');
++    const period = snapshot.periods.find((p) => p.id === periodId);
++    if (!period) throw new Error('Unknown month');
++    await repo.insertPayment(db(), {
++      id: randomUUID(), studentId: period.studentId, amount, method: 'Write-off', paymentDate: todayInMaseru(), reference: null, note: reason,
++      source: 'write_off', createdAt: new Date().toISOString(), idempotencyKey: `${profile.deviceId}:${randomUUID()}`, acknowledgementNumber: null,
++      longOffline: false, correctsPaymentId: null, writeOffPeriodId: periodId,
++    });
++    await afterWrite();
++  }, [afterWrite, profile, snapshot.periods]);
++
+   const markAckShared = useCallback(async (ackId: string, via: string) => {
+     await repo.markAckShared(db(), ackId, via);
+     await afterWrite();
+@@ -425,7 +438,7 @@ function useAppState() {
+     snapshot, accounts, accountById, unsyncedStudents, toReview,
+     sync, syncing, syncProblem, syncMessage, lastSyncAt, daysSinceSync, pendingCount, failedCount, retryFailed,
+     register, login, requestReset, confirmReset, unlock, signOut, closeAccount, updateRemoteSettings,
+-    addStudent, updateStudent, setPeriodCancelled, adjustCharge, adjustCharges, recordPayment, voidPayment, correctPayment, addCreditAdjustment, markAckShared,
++    addStudent, updateStudent, setPeriodCancelled, adjustCharge, adjustCharges, recordPayment, voidPayment, correctPayment, returnPaidAhead, writeOff, markAckShared,
+   };
+ }
+ 
+diff --git a/apps/mobile/src/data/repo.ts b/apps/mobile/src/data/repo.ts
+index 01d38c9..75a1b00 100644
+--- a/apps/mobile/src/data/repo.ts
++++ b/apps/mobile/src/data/repo.ts
+@@ -55,7 +55,7 @@ export const rowToPayment = (r: Row): LocalPayment => ({
+   id: r.id, studentId: r.student_id, amount: r.amount, method: r.method, paymentDate: r.payment_date,
+   reference: r.reference, note: r.note, source: r.source, createdAt: r.created_at, idempotencyKey: r.idempotency_key,
+   acknowledgementNumber: r.ack_number, longOffline: b(r.long_offline), voidedAt: r.voided_at, voidReason: r.void_reason,
+-  correctsPaymentId: r.corrects_payment_id,
++  correctsPaymentId: r.corrects_payment_id, writeOffPeriodId: r.write_off_period_id ?? null,
+ });
+ export const rowToAdjustment = (r: Row): CreditAdjustment => ({
+   id: r.id, studentId: r.student_id, type: r.type, amount: r.amount, reason: r.reason, createdAt: r.created_at,
+@@ -129,10 +129,11 @@ export async function setPeriodAmount(db: DB, id: string, amount: number, reason
+ export async function insertPayment(db: DB, p: LocalPayment): Promise<void> {
+   await db.runAsync(
+     `INSERT INTO payments (id, student_id, amount, method, payment_date, reference, note, source, created_at, idempotency_key, ack_number,
+-       long_offline, voided_at, void_reason, corrects_payment_id, rev, sync_status)
+-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending')`,
++       long_offline, voided_at, void_reason, corrects_payment_id, write_off_period_id, rev, sync_status)
++     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending')`,
+     [p.id, p.studentId, p.amount, p.method, p.paymentDate, p.reference ?? null, p.note ?? null, p.source, p.createdAt, p.idempotencyKey,
+-      p.acknowledgementNumber ?? null, p.longOffline ? 1 : 0, p.voidedAt ?? null, p.voidReason ?? null, p.correctsPaymentId ?? null],
++      p.acknowledgementNumber ?? null, p.longOffline ? 1 : 0, p.voidedAt ?? null, p.voidReason ?? null, p.correctsPaymentId ?? null,
++      p.writeOffPeriodId ?? null],
+   );
+ }
+ 
+diff --git a/apps/mobile/src/db/database.ts b/apps/mobile/src/db/database.ts
+index 5bfddac..003b98d 100644
+--- a/apps/mobile/src/db/database.ts
++++ b/apps/mobile/src/db/database.ts
+@@ -49,6 +49,8 @@ const MIGRATIONS: string[] = [
+   `ALTER TABLE periods ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE periods ADD COLUMN charge_note TEXT;
+    ALTER TABLE periods ADD COLUMN adjust_reason TEXT;`,
++  // v1.5: write-offs are stored as payments with source 'write_off' and the month they forgive.
++  `ALTER TABLE payments ADD COLUMN write_off_period_id TEXT;`,
+ ];
+ 
+ let opening: Promise<DB> | null = null;
+diff --git a/apps/mobile/src/lib/i18n.ts b/apps/mobile/src/lib/i18n.ts
+index 22a0046..284c2da 100644
+--- a/apps/mobile/src/lib/i18n.ts
++++ b/apps/mobile/src/lib/i18n.ts
+@@ -38,7 +38,7 @@ const S = {
+   outstandingFor: ['Still owed for {month}', 'E ntseng e kolotoa bakeng sa {month}'],
+   arrearsEarlier: ['Overdue from earlier months', 'E salletseng ea likhoeli tse fetileng'],
+   receivedIn: ['Cash received in {month}', 'Chelete e amohetsoeng ka {month}'],
+-  creditHeld: ['Paid ahead (credit)', 'E lefetsoeng esale pele'],
++  paidAheadTotal: ['Paid ahead', 'E lefetsoeng esale pele'],
+   provisionalNote: ['Includes records not yet confirmed online.', 'Ho kenyeletsa tse so netefatsoeng inthaneteng.'],
+   mostOverdue: ['Most overdue', 'Ba salletsoeng haholo'],
+   nobodyOverdue: ['Nobody is overdue.', 'Ha ho ea salletsoeng.'],
+@@ -94,13 +94,13 @@ const S = {
+   noPayments: ['No payments recorded yet.', 'Ha ho tefo e ngolisitsoeng.'],
+   recordedOf: ['{a} of {b}', '{a} ho {b}'],
+   sendReminder: ['Send reminder', 'Romela khopotso'],
+-  settleCredit: ['Settle credit', 'Lokisa chelete e lefetsoeng esale pele'],
++  returnPaidAhead: ['Return paid-ahead money', 'Khutlisa chelete e lefetsoeng esale pele'],
+   studentLeft: ['Student has left', 'Seithuti se tlohile'],
+   makeActive: ['Make active again', 'Khutlisetsa seithuti'],
+   dontCharge: ["Don't charge this month", 'Se lefise khoeli ena'],
+   chargeAgain: ['Charge this month again', 'Lefisa khoeli ena hape'],
+-  leftCreditPrompt: ['{name} has {amount} paid ahead. Record what happened to it.', '{name} o na le {amount} e lefetsoeng esale pele. Ngola hore na e entsoe joang.'],
+-  creditAdjustmentLabel: ['Credit settled', 'Chelete e lokisitsoe'],
++  leftPaidAheadPrompt: ['{name} has left with {amount} paid ahead. If you gave it back, record it here.', '{name} o tlohile a na le {amount} e lefetsoeng esale pele. Haeba u e khutlisitse, e ngole mona.'],
++  returnedToParent: ['Returned to parent', 'E khutliselitsoe motsoali'],
+ 
+   // record payment (FR-011, FR-014)
+   whoPaid: ['Who paid?', 'Ke mang ea lefileng?'],
+@@ -139,13 +139,27 @@ const S = {
+   allocatedTo: ['Counted toward', 'E baliloe ho'],
+   creditPart: ['paid ahead', 'esale pele'],
+ 
+-  // credit adjustment (FR-039)
+-  available: ['Available credit: {amount}', 'Chelete e lefetsoeng esale pele: {amount}'],
+-  adjRefunded: ['Money returned to parent', 'Chelete e khutliselitsoe motsoali'],
+-  adjWrittenOff: ['Written off', 'E tlohetsoe'],
+-  adjOther: ['Other', 'Tse ling'],
+-  adjReason: ['What happened?', 'Ho etsahetse eng?'],
+-  adjTooMuch: ['That is more than the available credit.', 'Sena se feta chelete e teng.'],
++  // returning paid-ahead money (FR-039)
++  paidAheadAvailable: ['Paid ahead: {amount}', 'E lefetsoeng esale pele: {amount}'],
++  returnHint: ['Record money you gave back to the parent. Paid-ahead money you keep is used for the coming months automatically.', 'Ngola chelete eo u e khutliselitseng motsoali. Chelete e lefetsoeng esale pele eo u e bolokang e sebelisoa likhoeling tse tlang.'],
++  amountReturned: ['Amount returned (M)', 'Chelete e khutlisitsoeng (M)'],
++  returnNote: ['Note, e.g. how and when it was returned', 'Tlhaloso, mohl. e khutlisitsoe joang le neng'],
++  returnTooMuch: ['That is more than the paid-ahead amount.', 'Sena se feta chelete e lefetsoeng esale pele.'],
++  saveReturn: ['Save', 'Boloka'],
++
++  // writing off what's owed
++  writeOff: ["Write off what's owed", 'Tlohela chelete e kolotoang'],
++  writeOffHint: ['Use this when you have decided not to collect money a parent owes for this month. It is not money received, and you can undo it later.', 'Sebelisa sena ha u nkile qeto ea ho se bokelle chelete eo motsoali a e kolotang bakeng sa khoeli ena. Hase chelete e amohetsoeng, ’me u ka e khutlisa hamorao.'],
++  owedFor: ['Owed for {month}: {amount}', 'E kolotoang bakeng sa {month}: {amount}'],
++  amountWrittenOff: ['Amount to write off (M)', 'Chelete e tlohelloang (M)'],
++  writeOffTooMuch: ['That is more than is owed for this month.', 'Sena se feta se kolotoang khoeling ena.'],
++  writeOffReason: ['Why are you writing it off?', 'Hobaneng u e tlohela?'],
++  saveWriteOff: ['Write off', 'Tlohela'],
++  writtenOff: ['Written off', 'E tlohetsoe'],
++  writtenOffAmount: ['{amount} written off', '{amount} e tlohetsoe'],
++  undoWriteOff: ['Undo write-off', 'Hlakola ho tlohela'],
++  undoReason: ['Why are you undoing it?', 'Hobaneng u e hlakola?'],
++  writeOffNotCash: ['Not money received. The parent no longer owes this amount.', 'Hase chelete e amohetsoeng. Motsoali ha a sa kolota chelete ena.'],
+   saveAdjustment: ['Save', 'Boloka'],
+ 
+   // reminders (FR-025)
+@@ -167,7 +181,7 @@ const S = {
+   exportCsv: ['Export to spreadsheet (CSV)', 'Romela ho spreadsheet (CSV)'],
+   exportStudents: ['Students', 'Liithuti'],
+   exportPayments: ['Payments', 'Litefo'],
+-  exportCredit: ['Credit settled', 'Chelete e lokisitsoeng'],
++  exportReturned: ['Paid-ahead money returned', 'Chelete e khutlisitsoeng'],
+ 
+   // settings (NFR-010)
+   business: ['Business name', 'Lebitso la khoebo'],
+@@ -228,7 +242,7 @@ const S = {
+   kindStudent: ['Student', 'Seithuti'],
+   kindPeriod: ['Month', 'Khoeli'],
+   kindPayment: ['Payment', 'Tefo'],
+-  kindAdjustment: ['Credit settled', 'Chelete e lokisitsoeng'],
++  kindAdjustment: ['Returned to parent', 'E khutliselitsoe motsoali'],
+   kindAck: ['Acknowledgement', 'Netefatso'],
+   forgotPinLocked: ['Forgot your PIN? Sign out and sign in again with a new PIN.', 'U lebetse PIN? Tsoa ebe u kena hape ka PIN e ncha.'],
+   // welcome (Tsela-Tšoeu)
+diff --git a/apps/mobile/src/lib/share.ts b/apps/mobile/src/lib/share.ts
+index 9327990..0be82dd 100644
+--- a/apps/mobile/src/lib/share.ts
++++ b/apps/mobile/src/lib/share.ts
+@@ -34,7 +34,7 @@ export function acknowledgementPlainText(d: AcknowledgementData, lang: Lang): st
+ }
+ 
+ /** FR-029: export works offline from the data on the phone. */
+-export async function shareCsv(kind: 'students' | 'payments' | 'credit', accounts: StudentAccount[]): Promise<void> {
++export async function shareCsv(kind: 'students' | 'payments' | 'returned', accounts: StudentAccount[]): Promise<void> {
+   const csv = kind === 'students' ? studentsCsv(accounts) : kind === 'payments' ? paymentsCsv(accounts) : creditAdjustmentsCsv(accounts);
+   const file = new File(Paths.cache, `tsela-tsoeu-${kind}-${new Date().toISOString().slice(0, 10)}.csv`);
+   if (file.exists) file.delete();
+diff --git a/apps/mobile/src/sync/engine.ts b/apps/mobile/src/sync/engine.ts
+index 5b97010..baffd79 100644
+--- a/apps/mobile/src/sync/engine.ts
++++ b/apps/mobile/src/sync/engine.ts
+@@ -53,6 +53,7 @@ export async function runSync(db: DB, token: string, deviceId: string): Promise<
+       id: r.id, studentId: r.student_id, amount: r.amount, method: r.method, paymentDate: r.payment_date, reference: r.reference,
+       note: r.note, source: r.source, createdAt: r.created_at, idempotencyKey: r.idempotency_key, acknowledgementNumber: r.ack_number,
+       voidedAt: r.voided_at, voidReason: r.void_reason, correctsPaymentId: r.corrects_payment_id, longOffline: r.long_offline === 1,
++      writeOffPeriodId: r.write_off_period_id ?? null,
+     })),
+     creditAdjustments: adjustments!.map((r) => ({ id: r.id, studentId: r.student_id, type: r.type, amount: r.amount, reason: r.reason, createdAt: r.created_at })),
+     acknowledgements: acks!.map((r) => ({
+@@ -114,12 +115,12 @@ export async function runSync(db: DB, token: string, deviceId: string): Promise<
+     for (const p of res.payments) {
+       await tx.runAsync(
+         `INSERT INTO payments (id, student_id, amount, method, payment_date, reference, note, source, created_at, idempotency_key, ack_number,
+-           long_offline, voided_at, void_reason, corrects_payment_id, rev, sync_status)
+-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'synced')
++           long_offline, voided_at, void_reason, corrects_payment_id, write_off_period_id, rev, sync_status)
++         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'synced')
+          ON CONFLICT(id) DO UPDATE SET voided_at=excluded.voided_at, void_reason=excluded.void_reason, ack_number=excluded.ack_number
+          WHERE payments.sync_status = 'synced'`,
+         [p.id, p.studentId, p.amount, p.method, p.paymentDate, p.reference, p.note, p.source, p.createdAt, p.idempotencyKey,
+-          p.acknowledgementNumber, p.longOffline ? 1 : 0, p.voidedAt, p.voidReason, p.correctsPaymentId],
++          p.acknowledgementNumber, p.longOffline ? 1 : 0, p.voidedAt, p.voidReason, p.correctsPaymentId, p.writeOffPeriodId ?? null],
+       );
+     }
+ 
+diff --git a/apps/server/migrations/003_write_offs.sql b/apps/server/migrations/003_write_offs.sql
+new file mode 100644
+index 0000000..c40dd28
+--- /dev/null
++++ b/apps/server/migrations/003_write_offs.sql
+@@ -0,0 +1,6 @@
++-- A write-off is recorded like a payment but is not money received: it forgives
++-- what was owed for one month (write_off_period_id). Voiding it undoes it.
++ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_source_check;
++ALTER TABLE payments ADD CONSTRAINT payments_source_check CHECK (source IN ('manual','voice','write_off'));
++ALTER TABLE payments ADD COLUMN write_off_period_id uuid REFERENCES billing_periods(id) ON DELETE SET NULL;
++ALTER TABLE payments ADD CONSTRAINT write_off_has_period CHECK ((source = 'write_off') = (write_off_period_id IS NOT NULL));
+diff --git a/apps/server/src/ledger.ts b/apps/server/src/ledger.ts
+index 89b7e6e..61e69aa 100644
+--- a/apps/server/src/ledger.ts
++++ b/apps/server/src/ledger.ts
+@@ -31,9 +31,9 @@ export interface PeriodRow {
+ }
+ export interface PaymentRow {
+   id: string; student_id: string; amount: number; method: string; payment_date: string; reference: string | null;
+-  note: string | null; source: 'manual' | 'voice'; idempotency_key: string; acknowledgement_number: string | null;
++  note: string | null; source: 'manual' | 'voice' | 'write_off'; idempotency_key: string; acknowledgement_number: string | null;
+   created_at: string; voided_at: string | null; void_reason: string | null; corrects_payment_id: string | null;
+-  long_offline: boolean; server_seq: number;
++  long_offline: boolean; write_off_period_id: string | null; server_seq: number;
+ }
+ export interface AdjustmentRow {
+   id: string; student_id: string; type: CreditAdjustment['type']; amount: number; reason: string; created_at: string; server_seq: number;
+@@ -53,6 +53,7 @@ export const toPayment = (r: PaymentRow): Payment => ({
+   id: r.id, studentId: r.student_id, amount: r.amount, method: r.method, paymentDate: r.payment_date,
+   reference: r.reference, note: r.note, source: r.source, createdAt: r.created_at, voidedAt: r.voided_at,
+   voidReason: r.void_reason, correctsPaymentId: r.corrects_payment_id, acknowledgementNumber: r.acknowledgement_number,
++  writeOffPeriodId: r.write_off_period_id,
+ });
+ export const toAdjustment = (r: AdjustmentRow): CreditAdjustment => ({
+   id: r.id, studentId: r.student_id, type: r.type, amount: r.amount, reason: r.reason, createdAt: r.created_at,
+diff --git a/apps/server/src/schemas.ts b/apps/server/src/schemas.ts
+index c8efaf3..c61380e 100644
+--- a/apps/server/src/schemas.ts
++++ b/apps/server/src/schemas.ts
+@@ -78,7 +78,8 @@ export const PaymentDTO = z.object({
+   paymentDate: isoDate,
+   reference: z.string().trim().max(80).nullable().optional(),
+   note: z.string().trim().max(500).nullable().optional(),
+-  source: z.enum(['manual', 'voice']),
++  source: z.enum(['manual', 'voice', 'write_off']),
++  writeOffPeriodId: uuid.nullable().optional(),
+   createdAt: isoDateTime,
+   idempotencyKey: z.string().min(8).max(100),
+   acknowledgementNumber: z.string().max(40).nullable().optional(),
+@@ -91,7 +92,8 @@ export const PaymentDTO = z.object({
+ export const CreditAdjustmentDTO = z.object({
+   id: uuid,
+   studentId: uuid,
+-  type: z.enum(['refunded_outside_app', 'written_off', 'other']),
++  // Paid-ahead money can only be returned to the parent; writing off applies to money owed (a write_off payment).
++  type: z.literal('refunded_outside_app'),
+   amount: lisente.refine((v) => v > 0, 'Amount must be more than zero'),
+   reason: z.string().trim().min(1).max(300),
+   createdAt: isoDateTime,
+diff --git a/apps/server/src/sync.ts b/apps/server/src/sync.ts
+index bd7b952..ec74ae2 100644
+--- a/apps/server/src/sync.ts
++++ b/apps/server/src/sync.ts
+@@ -180,20 +180,30 @@ export async function applyPush(q: Queryable, ctx: SyncContext, push: z.infer<ty
+     if (!existing) {
+       const dup = await q.query<{ id: string }>('SELECT id FROM payments WHERE user_id = $1 AND idempotency_key = $2', [ctx.userId, pay.idempotencyKey]);
+       if (dup.rows[0]) { results.push(ignored(pay.id, `duplicate_of:${dup.rows[0].id}`)); continue; }
++      if (pay.source === 'write_off') {
++        const target = pay.writeOffPeriodId
++          ? (await q.query<{ student_id: string }>('SELECT student_id FROM billing_periods WHERE id = $1', [pay.writeOffPeriodId])).rows[0]
++          : undefined;
++        if (!target || target.student_id !== pay.studentId) { results.push(rejected(pay.id, 'unknown_period', 'Choose the month to write off')); continue; }
++        if (!pay.note?.trim()) { results.push(rejected(pay.id, 'reason_required', 'Give a reason for the write-off.')); continue; }
++      } else if (pay.writeOffPeriodId) {
++        results.push(rejected(pay.id, 'invalid', 'Only a write-off can target a month'));
++        continue;
++      }
+       if (pay.correctsPaymentId) {
+         const orig = (await q.query<{ user_id: string }>('SELECT user_id FROM payments WHERE id = $1', [pay.correctsPaymentId])).rows[0];
+         if (!orig || orig.user_id !== ctx.userId) { results.push(rejected(pay.id, 'unknown_original', 'The record being corrected was not found')); continue; }
+       }
+       await q.query(
+         `INSERT INTO payments (id, user_id, student_id, amount, method, payment_date, reference, note, source, idempotency_key,
+-           acknowledgement_number, device_id, created_by, created_at, long_offline, voided_at, void_reason, corrects_payment_id)
+-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$2,$13,$14,$15,$16,$17)`,
++           acknowledgement_number, device_id, created_by, created_at, long_offline, voided_at, void_reason, corrects_payment_id, write_off_period_id)
++         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$2,$13,$14,$15,$16,$17,$18)`,
+         [pay.id, ctx.userId, pay.studentId, pay.amount, pay.method, pay.paymentDate, pay.reference ?? null, pay.note ?? null, pay.source,
+           pay.idempotencyKey, pay.acknowledgementNumber ?? null, ctx.deviceId, pay.createdAt, pay.longOffline, pay.voidedAt ?? null,
+-          pay.voidReason ?? null, pay.correctsPaymentId ?? null],
++          pay.voidReason ?? null, pay.correctsPaymentId ?? null, pay.writeOffPeriodId ?? null],
+       );
+       const { voidedAt: _v, voidReason: _r, ...created } = pay;
+-      await audit(q, { userId: ctx.userId, deviceId: ctx.deviceId, entityType: 'payment', entityId: pay.id, action: pay.correctsPaymentId ? 'adjust' : 'create', next: created });
++      await audit(q, { userId: ctx.userId, deviceId: ctx.deviceId, entityType: 'payment', entityId: pay.id, action: pay.source === 'write_off' ? 'write_off' : pay.correctsPaymentId ? 'adjust' : 'create', next: created });
+       if (pay.voidedAt) {
+         await audit(q, { userId: ctx.userId, deviceId: ctx.deviceId, entityType: 'payment', entityId: pay.id, action: 'void', previous: { voidedAt: null }, next: { voidedAt: pay.voidedAt, voidReason: pay.voidReason } });
+       }
+@@ -231,7 +241,7 @@ export async function applyPush(q: Queryable, ctx: SyncContext, push: z.infer<ty
+     if (existing) { results.push(ok(a.id)); continue; }
+     const ledger = computeLedger(await loadStudentLedgerInputs(q, a.studentId));
+     if (a.amount > ledger.credit) {
+-      results.push(rejected(a.id, 'exceeds_credit', `Only ${ledger.credit} lisente of credit is available`));
++      results.push(rejected(a.id, 'exceeds_paid_ahead', `Only M${(ledger.credit / 100).toFixed(2)} paid ahead can be returned`));
+       continue;
+     }
+     await q.query(
+@@ -313,7 +323,7 @@ export async function pullChanges(q: Queryable, userId: string, cursor: number)
+       id: r.id, studentId: r.student_id, amount: r.amount, method: r.method, paymentDate: r.payment_date,
+       reference: r.reference, note: r.note, source: r.source, createdAt: r.created_at, idempotencyKey: r.idempotency_key,
+       acknowledgementNumber: r.acknowledgement_number, voidedAt: r.voided_at, voidReason: r.void_reason,
+-      correctsPaymentId: r.corrects_payment_id, longOffline: r.long_offline,
++      correctsPaymentId: r.corrects_payment_id, longOffline: r.long_offline, writeOffPeriodId: r.write_off_period_id,
+     })),
+     creditAdjustments: adjustments.rows.map((r) => ({
+       id: r.id, studentId: r.student_id, type: r.type, amount: r.amount, reason: r.reason, createdAt: r.created_at,
+diff --git a/apps/server/test/api.test.ts b/apps/server/test/api.test.ts
+index 29e65b2..d09b385 100644
+--- a/apps/server/test/api.test.ts
++++ b/apps/server/test/api.test.ts
+@@ -154,7 +154,7 @@ describe('sync and bookkeeping', () => {
+   it('turns an overpayment into credit, guards credit adjustments, and supports cancellation (FR-010, FR-039)', async () => {
+     await sync({ payments: [paymentDto(studentId, M(1200), '2026-10-04')] }); // Oct full (700 left) → 500 credit
+     const tooMuch = await sync({ creditAdjustments: [{ id: randomUUID(), studentId, type: 'refunded_outside_app', amount: M(600), reason: 'Refund', createdAt: clock.toISOString() }] });
+-    assert.equal(tooMuch.results[0].reason, 'exceeds_credit');
++    assert.equal(tooMuch.results[0].reason, 'exceeds_paid_ahead');
+ 
+     const octId = (await db.query<{ id: string }>('SELECT id FROM billing_periods WHERE student_id = $1 AND month = 10', [studentId])).rows[0]!.id;
+     const cancel = await sync({
+@@ -167,7 +167,7 @@ describe('sync and bookkeeping', () => {
+     const refund = await sync({ creditAdjustments: [{ id: randomUUID(), studentId, type: 'refunded_outside_app', amount: M(1500), reason: 'Left school; returned prepayment', createdAt: clock.toISOString() }] });
+     assert.equal(refund.results[0].status, 'ok');
+     const report = await call('GET', '/v1/reports/monthly?year=2026&month=10', undefined, op.token);
+-    assert.equal(report.body.totalCredit, 0);
++    assert.equal(report.body.totalPaidAhead, 0);
+     assert.equal(report.body.cancelled, 1);
+     assert.equal(report.body.creditAdjustmentsTotal, M(1500));
+   });
+@@ -201,7 +201,7 @@ describe('sync and bookkeeping', () => {
+     const r = await call('GET', '/v1/export/payments.csv', undefined, op.token);
+     assert.equal(r.status, 200);
+     assert.match(r.body as string, /^payment_id,acknowledgement,student,amount/);
+-    assert.match(r.body as string, /2026-08:500\.00 2026-09:1000\.00 adjustment:200\.00/);
++    assert.match(r.body as string, /2026-08:500\.00 2026-09:1000\.00 returned:200\.00/);
+   });
+ });
+ 
+@@ -261,6 +261,47 @@ describe('billing rules and school calendars', () => {
+   });
+ });
+ 
++describe('write-offs and returning paid-ahead money', () => {
++  it('forgives one month with a reason, keeps it out of money received, and can be undone', async () => {
++    const op = await newOperator('62000040');
++    const sid = randomUUID();
++    clock = new Date('2026-10-20T08:00:00Z');
++    let cursor = 0;
++    const sync = async (push: Record<string, unknown[]> = {}) => {
++      const r = await call('POST', '/v1/sync', { deviceId: op.deviceId, cursor, push }, op.token);
++      assert.equal(r.status, 200, JSON.stringify(r.body));
++      cursor = r.body.cursor;
++      return r.body;
++    };
++    const first = await sync({ students: [studentDto(sid, { onboardedAt: '2026-09-01' })] });
++    const sep = first.periods.find((p: any) => p.month === 9);
++
++    const base = paymentDto(sid, M(1000), '2026-10-20', { source: 'write_off', method: 'Write-off', writeOffPeriodId: sep.id });
++    const noReason = await sync({ payments: [base] });
++    assert.equal(noReason.results[0].reason, 'reason_required');
++
++    const wo = { ...base, id: randomUUID(), idempotencyKey: `key-${randomUUID()}`, note: 'Family hardship' };
++    const done = await sync({ payments: [wo] });
++    assert.equal(done.results[0].status, 'ok');
++    const sepAfter = done.periods.find((p: any) => p.month === 9);
++    assert.equal(sepAfter.balance, 0);
++    assert.equal(sepAfter.amountRecorded, 0); // forgiven, not received
++    const report = await call('GET', '/v1/reports/monthly?year=2026&month=9', undefined, op.token);
++    assert.equal(report.body.writtenOff, M(1000));
++    assert.equal(report.body.recorded, 0);
++    const daily = await call('GET', '/v1/reports/daily?date=2026-10-20', undefined, op.token);
++    assert.equal(daily.body.total, 0);
++
++    const undone = await sync({ payments: [{ ...wo, voidedAt: clock.toISOString(), voidReason: 'Parent paid after all' }] });
++    assert.equal(undone.periods.find((p: any) => p.month === 9).balance, M(1000));
++
++    // Paid-ahead money can only be returned, never written off.
++    const bad = await sync({ creditAdjustments: [{ id: randomUUID(), studentId: sid, type: 'written_off', amount: M(100), reason: 'x', createdAt: clock.toISOString() }] });
++    assert.equal(bad.results[0].status, 'rejected');
++    clock = new Date('2026-10-06T08:00:00Z');
++  });
++});
++
+ describe('account closure (FR-037)', () => {
+   it('blocks a closed account, allows reopening, and purges after 90 days', async () => {
+     const op = await newOperator('62000020');
+diff --git a/packages/core/src/accounts.ts b/packages/core/src/accounts.ts
+index c3a68c7..a0e9107 100644
+--- a/packages/core/src/accounts.ts
++++ b/packages/core/src/accounts.ts
+@@ -44,9 +44,14 @@ export interface StudentAccount {
+   outstanding: Lisente;
+   /** Sum of balances on overdue periods. */
+   arrears: Lisente;
++  /** Paid ahead and not yet counted toward any month (can be returned to the parent). */
+   credit: Lisente;
+   /** Paid towards months that have not begun yet. */
+   prepaid: Lisente;
++  /** Everything the family has paid ahead: credit + prepaid. Shown to drivers as "Paid ahead". */
++  paidAhead: Lisente;
++  /** Owed but forgiven by the driver, across all months. */
++  writtenOff: Lisente;
+   /** outstanding − credit − prepaid; negative means the family is ahead. */
+   net: Lisente;
+   status: AccountStatus;
+@@ -111,6 +116,8 @@ export function buildStudentAccount(args: {
+     arrears,
+     credit: ledger.credit,
+     prepaid,
++    paidAhead: ledger.credit + prepaid,
++    writtenOff: ledger.totalWrittenOff,
+     net: outstanding - ledger.credit - prepaid,
+     status: accountStatusFor(arrears, ledger.credit + prepaid),
+     maxDaysOverdue: maxDays,
+diff --git a/packages/core/src/allocation.ts b/packages/core/src/allocation.ts
+index 355c04e..e40a248 100644
+--- a/packages/core/src/allocation.ts
++++ b/packages/core/src/allocation.ts
+@@ -19,13 +19,15 @@ import type {
+ export interface Ledger {
+   allocations: Allocation[];
+   periods: Map<string, PeriodState>;
+-  /** Recorded money not allocated to any period or adjustment (an advance). */
++  /** Money received but not yet counted toward any month: paid ahead. (Internally called credit.) */
+   credit: Lisente;
+   /** How much of each credit adjustment was actually covered by credit. */
+   adjustmentsCovered: Map<string, Lisente>;
+   /** Credit adjustments that exceed the credit available at their point in the sequence. */
+   unfundedAdjustmentIds: string[];
++  /** Money received (write-offs excluded). */
+   totalRecorded: Lisente;
++  totalWrittenOff: Lisente;
+ }
+ 
+ interface Sink {
+@@ -49,10 +51,10 @@ function comparePayments(a: Payment, b: Payment): number {
+   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+ }
+ 
+-export function periodStatusFor(amountDue: Lisente, recorded: Lisente, cancelled: boolean): PeriodStatus {
++export function periodStatusFor(amountDue: Lisente, recorded: Lisente, cancelled: boolean, writtenOff = 0): PeriodStatus {
+   if (cancelled) return 'cancelled';
+-  if (recorded >= amountDue) return 'paid';
+-  if (recorded > 0) return 'partial';
++  if (recorded + writtenOff >= amountDue) return 'paid';
++  if (recorded > 0 || writtenOff > 0) return 'partial';
+   return 'unpaid';
+ }
+ 
+@@ -64,20 +66,37 @@ export function computeLedger(input: {
+   // Sinks absorb recorded money in chronological order: every non-cancelled
+   // period by its start date, and every credit adjustment at the date it was
+   // made, so a refund of credit is taken before any later period could use it.
++  const allocations: Allocation[] = [];
++
++  // Write-offs first: each forgives part of one specific month, never more than
++  // that month's charge, and never turns into paid-ahead money.
++  const writtenOff = new Map<string, Lisente>();
++  const periodById = new Map(input.periods.map((p) => [p.id, p]));
++  let totalWrittenOff = 0;
++  for (const w of input.payments.filter((p) => !p.voidedAt && p.source === 'write_off').sort(comparePayments)) {
++    const target = w.writeOffPeriodId ? periodById.get(w.writeOffPeriodId) : undefined;
++    if (!target || target.cancelled) continue;
++    const used = writtenOff.get(target.id) ?? 0;
++    const take = Math.min(w.amount, target.amountDue - used);
++    if (take <= 0) continue;
++    writtenOff.set(target.id, used + take);
++    allocations.push({ paymentId: w.id, targetId: target.id, target: 'period', amount: take });
++    totalWrittenOff += take;
++  }
++
+   const sinks: Sink[] = [];
+   for (const p of input.periods) {
+     if (p.cancelled) continue;
+-    sinks.push({ kind: 'period', id: p.id, sortDate: p.periodStart, rank: 0, tiebreak: `${p.periodStart}|${p.id}`, capacity: p.amountDue });
++    sinks.push({ kind: 'period', id: p.id, sortDate: p.periodStart, rank: 0, tiebreak: `${p.periodStart}|${p.id}`, capacity: p.amountDue - (writtenOff.get(p.id) ?? 0) });
+   }
+   for (const a of input.adjustments) {
+     sinks.push({ kind: 'adjustment', id: a.id, sortDate: a.createdAt.slice(0, 10), rank: 1, tiebreak: `${a.createdAt}|${a.id}`, capacity: a.amount });
+   }
+   sinks.sort(compareSinks);
+ 
+-  const payments = input.payments.filter((p) => !p.voidedAt).sort(comparePayments);
++  const payments = input.payments.filter((p) => !p.voidedAt && p.source !== 'write_off').sort(comparePayments);
+ 
+   const filled = new Map<string, Lisente>();
+-  const allocations: Allocation[] = [];
+   let cursor = 0;
+   let totalRecorded = 0;
+   let unallocated = 0;
+@@ -105,11 +124,13 @@ export function computeLedger(input: {
+   const periods = new Map<string, PeriodState>();
+   for (const p of input.periods) {
+     const recorded = p.cancelled ? 0 : filled.get(p.id) ?? 0;
++    const off = p.cancelled ? 0 : writtenOff.get(p.id) ?? 0;
+     periods.set(p.id, {
+       periodId: p.id,
+       amountRecorded: recorded,
+-      balance: p.cancelled ? 0 : p.amountDue - recorded,
+-      status: periodStatusFor(p.amountDue, recorded, p.cancelled),
++      writtenOff: off,
++      balance: p.cancelled ? 0 : p.amountDue - recorded - off,
++      status: periodStatusFor(p.amountDue, recorded, p.cancelled, off),
+     });
+   }
+ 
+@@ -121,7 +142,7 @@ export function computeLedger(input: {
+     if (covered < a.amount) unfundedAdjustmentIds.push(a.id);
+   }
+ 
+-  return { allocations, periods, credit: unallocated, adjustmentsCovered, unfundedAdjustmentIds, totalRecorded };
++  return { allocations, periods, credit: unallocated, adjustmentsCovered, unfundedAdjustmentIds, totalRecorded, totalWrittenOff };
+ }
+ 
+ /**
+diff --git a/packages/core/src/exports.ts b/packages/core/src/exports.ts
+index 0f4a45b..e3eec2e 100644
+--- a/packages/core/src/exports.ts
++++ b/packages/core/src/exports.ts
+@@ -16,7 +16,8 @@ export function studentsCsv(accounts: StudentAccount[]): string {
+     { header: 'status', value: (a) => a.student.status },
+     { header: 'outstanding', value: (a) => csvAmount(a.outstanding) },
+     { header: 'arrears', value: (a) => csvAmount(a.arrears) },
+-    { header: 'credit', value: (a) => csvAmount(a.credit) },
++    { header: 'paid_ahead', value: (a) => csvAmount(a.paidAhead) },
++    { header: 'written_off', value: (a) => csvAmount(a.writtenOff) },
+     { header: 'account_status', value: (a) => a.status },
+   ]);
+ }
+@@ -27,7 +28,7 @@ export function paymentsCsv(accounts: StudentAccount[]): string {
+     return a.payments.map((p) => {
+       const allocated = a.ledger.allocations
+         .filter((x) => x.paymentId === p.id)
+-        .map((x) => `${x.target === 'period' ? periodLabel.get(x.targetId) ?? x.targetId : 'adjustment'}:${csvAmount(x.amount)}`)
++        .map((x) => `${x.target === 'period' ? periodLabel.get(x.targetId) ?? x.targetId : 'returned'}:${csvAmount(x.amount)}`)
+         .join(' ');
+       return { a, p, allocated };
+     });
+diff --git a/packages/core/src/messages.ts b/packages/core/src/messages.ts
+index 74628ef..e21271c 100644
+--- a/packages/core/src/messages.ts
++++ b/packages/core/src/messages.ts
+@@ -39,7 +39,7 @@ const ACK: Record<Lang, {
+     method: 'Method',
+     reference: 'Reference',
+     balance: (asOf) => `Balance still owed as of ${asOf}`,
+-    credit: (asOf) => `Paid ahead (credit) as of ${asOf}`,
++    credit: (asOf) => `Paid ahead as of ${asOf}`,
+     pending: 'not yet confirmed online',
+     footer: (b) => `${b} has recorded this payment. This is an acknowledgement for your reference, not a tax or fiscal receipt.`,
+   },
+diff --git a/packages/core/src/reports.ts b/packages/core/src/reports.ts
+index ac1d046..9375f7a 100644
+--- a/packages/core/src/reports.ts
++++ b/packages/core/src/reports.ts
+@@ -12,16 +12,18 @@ export interface MonthSummary {
+   cancelled: number;
+   /** Sum of amount due on this month's periods. */
+   expected: Lisente;
+-  /** Sum recorded against this month's periods (after FIFO allocation). */
++  /** Money received and counted toward this month's periods (after FIFO allocation). */
+   recorded: Lisente;
+-  /** expected − recorded for this month's periods. */
++  /** Owed for this month but forgiven by drivers. */
++  writtenOff: Lisente;
++  /** expected − recorded − writtenOff for this month's periods. */
+   outstanding: Lisente;
+   /** Cash received in this month, whichever periods it paid for. */
+   received: Lisente;
+   /** Balances on overdue periods from earlier months. */
+   arrearsEarlier: Lisente;
+-  /** Credit held across all students. */
+-  totalCredit: Lisente;
++  /** Paid ahead across all students. */
++  totalPaidAhead: Lisente;
+   creditAdjustmentsCount: number;
+   creditAdjustmentsTotal: Lisente;
+   /** True if any figure includes a provisional period. */
+@@ -41,10 +43,11 @@ export function summarizeMonth(accounts: StudentAccount[], year: number, month:
+     cancelled: 0,
+     expected: 0,
+     recorded: 0,
++    writtenOff: 0,
+     outstanding: 0,
+     received: 0,
+     arrearsEarlier: 0,
+-    totalCredit: 0,
++    totalPaidAhead: 0,
+     creditAdjustmentsCount: 0,
+     creditAdjustmentsTotal: 0,
+     provisional: false,
+@@ -52,7 +55,7 @@ export function summarizeMonth(accounts: StudentAccount[], year: number, month:
+ 
+   for (const acc of accounts) {
+     if (acc.student.status === 'active') s.activeStudents++;
+-    s.totalCredit += acc.credit + acc.prepaid;
++    s.totalPaidAhead += acc.paidAhead;
+ 
+     for (const v of acc.periods) {
+       const cmp = compareMonths(v.period, { year, month });
+@@ -64,6 +67,7 @@ export function summarizeMonth(accounts: StudentAccount[], year: number, month:
+         }
+         s.expected += v.period.amountDue;
+         s.recorded += v.state.amountRecorded;
++        s.writtenOff += v.state.writtenOff;
+         s.outstanding += v.state.balance;
+         if (v.state.status === 'paid') s.paid++;
+         else if (v.state.status === 'partial') s.partial++;
+@@ -74,7 +78,7 @@ export function summarizeMonth(accounts: StudentAccount[], year: number, month:
+     }
+ 
+     for (const p of acc.payments) {
+-      if (!p.voidedAt && p.paymentDate.startsWith(key)) s.received += p.amount;
++      if (!p.voidedAt && p.source !== 'write_off' && p.paymentDate.startsWith(key)) s.received += p.amount;
+     }
+     for (const a of acc.adjustments) {
+       if (a.createdAt.startsWith(key)) {
+@@ -99,7 +103,7 @@ export function dailyReport(payments: Payment[], date: ISODate): DailyReport {
+   let count = 0;
+   let total = 0;
+   for (const p of payments) {
+-    if (p.voidedAt || p.paymentDate !== date) continue;
++    if (p.voidedAt || p.source === 'write_off' || p.paymentDate !== date) continue;
+     count++;
+     total += p.amount;
+     const m = methods.get(p.method) ?? { count: 0, total: 0 };
+@@ -121,6 +125,8 @@ export interface HistoryFilter {
+   /** Only payments allocated (in whole or part) to this period. */
+   periodId?: string;
+   includeVoided?: boolean;
++  /** Write-offs are not money received; left out unless asked for. */
++  includeWriteOffs?: boolean;
+ }
+ 
+ /** FR-028: filter payment history. */
+@@ -133,6 +139,7 @@ export function filterPayments(accounts: StudentAccount[], f: HistoryFilter): Pa
+       : null;
+     for (const p of acc.payments) {
+       if (!f.includeVoided && p.voidedAt) continue;
++      if (!f.includeWriteOffs && p.source === 'write_off') continue;
+       if (f.from && p.paymentDate < f.from) continue;
+       if (f.to && p.paymentDate > f.to) continue;
+       if (f.method && p.method !== f.method) continue;
+diff --git a/packages/core/src/types.ts b/packages/core/src/types.ts
+index efe3990..f7e3b0a 100644
+--- a/packages/core/src/types.ts
++++ b/packages/core/src/types.ts
+@@ -53,7 +53,8 @@ export interface BillingPeriod {
+ 
+ export type PeriodStatus = 'unpaid' | 'partial' | 'paid' | 'cancelled';
+ 
+-export type PaymentSource = 'manual' | 'voice';
++/** write_off: not money received — the driver forgave what was owed for one month (targets writeOffPeriodId). */
++export type PaymentSource = 'manual' | 'voice' | 'write_off';
+ 
+ export interface Payment {
+   id: string;
+@@ -70,8 +71,15 @@ export interface Payment {
+   /** Set on a replacement record created by a correction (FR-016). */
+   correctsPaymentId?: string | null;
+   acknowledgementNumber?: string | null;
++  /** For a write-off: the month whose debt is forgiven. */
++  writeOffPeriodId?: string | null;
+ }
+ 
++/**
++ * A reduction of paid-ahead money that does not void any payment.
++ * New records are only ever refunded_outside_app ("returned to parent");
++ * written_off and other exist only in data recorded before v1.5.
++ */
+ export type CreditAdjustmentType = 'refunded_outside_app' | 'written_off' | 'other';
+ 
+ export interface CreditAdjustment {
+@@ -93,7 +101,10 @@ export interface Allocation {
+ 
+ export interface PeriodState {
+   periodId: string;
++  /** Money received and counted toward this month. */
+   amountRecorded: Lisente;
++  /** Owed for this month but forgiven by the driver. */
++  writtenOff: Lisente;
+   balance: Lisente;
+   status: PeriodStatus;
+ }
+diff --git a/packages/core/test/charges.test.ts b/packages/core/test/charges.test.ts
+index 9547ae5..4bc7d3e 100644
+--- a/packages/core/test/charges.test.ts
++++ b/packages/core/test/charges.test.ts
+@@ -111,3 +111,40 @@ describe('months that have not begun', () => {
+     assert.equal(later.maxDaysOverdue, 1);
+   });
+ });
++
++describe('write-offs', () => {
++  const student: Student = {
++    id: 's', name: 'Lineo', parentName: 'P', parentPhone: '+26658123456', school: 'X', pickupLocation: '', dropoffLocation: '',
++    monthlyFee: M(1000), onboardedAt: '2026-08-01', status: 'active',
++  };
++  const per = (m: number) => buildPeriod({ id: `p${m}`, studentId: 's', year: 2026, month: m, amountDue: M(1000), dueDay: 1, origin: 'server' });
++  const cash = (amount: number, date: string, id = `c-${date}`) => ({ id, studentId: 's', amount, method: 'Cash', paymentDate: date, source: 'manual' as const, createdAt: `${date}T08:00:00Z` });
++  const writeOff = (amount: number, periodId: string, over: Record<string, unknown> = {}) => ({
++    id: `w-${periodId}`, studentId: 's', amount, method: 'Write-off', paymentDate: '2026-10-10', source: 'write_off' as const,
++    createdAt: '2026-10-10T08:00:00Z', writeOffPeriodId: periodId, note: 'Family hardship', ...over,
++  });
++
++  it('forgives one specific month, not the oldest', () => {
++    const acc = buildStudentAccount({ student, periods: [per(8), per(9), per(10)], payments: [writeOff(M(1000), 'p9')], adjustments: [], today: '2026-10-20', settings: DEFAULT_SETTINGS });
++    const sep = acc.periods.find((v) => v.period.id === 'p9')!;
++    assert.equal(sep.state.writtenOff, M(1000));
++    assert.equal(sep.state.balance, 0);
++    assert.equal(acc.outstanding, M(2000)); // August and October still owed
++    assert.equal(acc.writtenOff, M(1000));
++  });
++
++  it('never becomes paid-ahead money, and is not money received', () => {
++    const acc = buildStudentAccount({ student, periods: [per(10)], payments: [cash(M(600), '2026-10-02'), writeOff(M(900), 'p10')], adjustments: [], today: '2026-10-20', settings: DEFAULT_SETTINGS });
++    const oct = acc.periods[0]!.state;
++    assert.equal(oct.writtenOff, M(900)); // applied first, capped by the month's charge
++    assert.equal(oct.amountRecorded, M(100));
++    assert.equal(acc.paidAhead, M(500)); // the real cash beyond what was still owed
++    assert.equal(acc.ledger.totalRecorded, M(600));
++  });
++
++  it('can be undone by voiding it', () => {
++    const acc = buildStudentAccount({ student, periods: [per(10)], payments: [writeOff(M(1000), 'p10', { voidedAt: '2026-10-11T08:00:00Z' })], adjustments: [], today: '2026-10-20', settings: DEFAULT_SETTINGS });
++    assert.equal(acc.outstanding, M(1000));
++    assert.equal(acc.writtenOff, 0);
++  });
++});
+diff --git a/packages/core/test/ledger.test.ts b/packages/core/test/ledger.test.ts
+index 3c136ca..a7057c7 100644
+--- a/packages/core/test/ledger.test.ts
++++ b/packages/core/test/ledger.test.ts
+@@ -214,7 +214,7 @@ describe('reports', () => {
+     assert.equal(s.expected, M(2000));
+     // Mpho's payment went FIFO to September, so October shows nothing recorded for him.
+     assert.equal(s.recorded, M(400));
+-    assert.equal(s.outstanding, s.expected - s.recorded);
++    assert.equal(s.outstanding, s.expected - s.recorded - s.writtenOff);
+     assert.equal(s.received, M(1400));
+     assert.equal(s.partial, 1);
+     assert.equal(s.unpaid, 1);
+diff --git a/packages/core/test/utils.test.ts b/packages/core/test/utils.test.ts
+index e731a98..b8d5361 100644
+--- a/packages/core/test/utils.test.ts
++++ b/packages/core/test/utils.test.ts
+@@ -67,7 +67,7 @@ describe('messages', () => {
+     const t = acknowledgementText(data);
+     assert.match(t, /DEV3-000142/);
+     assert.match(t, /not a tax or fiscal receipt/);
+-    assert.match(t, /Paid ahead \(credit\) as of 6 October 2026, 14:05 \(not yet confirmed online\): M200/);
++    assert.match(t, /Paid ahead as of 6 October 2026, 14:05 \(not yet confirmed online\): M200/);
+   });
+   it('builds reminders with no payment link', () => {
+     const t = reminderText({ parentName: 'Palesa', studentName: 'Mpho', businessName: 'Thabo Transport', periods: [{ year: 2026, month: 9, balance: 40000 }], total: 40000 });
