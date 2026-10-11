@@ -75,7 +75,7 @@ export function StudentForm({ existing, today, onSave }: { existing?: Student; t
 
       {!existing ? (
         <>
-          <DateChooser label={t('startDate')} value={start} onChange={(d) => { setStart(d); setChoice(null); }} today={today} />
+          <DateChooser label={t('startDate')} value={start} onChange={(d) => { setStart(d); setChoice(null); }} today={today} allowFuture />
           <View style={{ gap: space.sm }}>
             <Txt variant="label" bold>{t('firstMonthCharge', { month: formatMonth(year, month, lang) })}</Txt>
             <ChipRow>

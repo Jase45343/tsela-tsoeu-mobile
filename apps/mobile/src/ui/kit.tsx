@@ -5,7 +5,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { addDays, isISODate, type ISODate } from '@busledger/core';
+import { addDays, formatDateLong, makeDate, parts, type ISODate } from '@busledger/core';
+import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+//import { addDays, isISODate, type ISODate } from '@busledger/core';
 import { color, font, MIN_TOUCH, radius, space, type } from './theme';
 import { useT } from '../lib/i18n';
 
@@ -183,27 +185,33 @@ export function Figure({ label, value, tone = color.ink, note }: { label: string
   );
 }
 
-export function DateChooser({ value, onChange, today, label }: { value: ISODate; onChange: (d: ISODate) => void; today: ISODate; label: string }) {
-  const { t } = useT();
+const toDate = (iso: ISODate) => { const p = parts(iso); return new Date(p.year, p.month - 1, p.day); };
+const fromDate = (d: Date) => makeDate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+
+/** Today and Yesterday are one tap; any other day opens the Android calendar. */
+export function DateChooser({ value, onChange, today, label, allowFuture }: {
+  value: ISODate; onChange: (d: ISODate) => void; today: ISODate; label: string; allowFuture?: boolean;
+}) {
+  const { t, lang } = useT();
   const yesterday = addDays(today, -1);
-  const [other, setOther] = useState(value !== today && value !== yesterday);
-  const [text, setText] = useState(value);
-  const bad = other && (!isISODate(text) || text > today);
+  const isOther = value !== today && value !== yesterday;
+  const openCalendar = () =>
+    DateTimePickerAndroid.open({
+      value: toDate(value),
+      mode: 'date',
+      maximumDate: allowFuture ? undefined : toDate(today),
+      onChange: (event, picked) => {
+        if (event.type === 'set' && picked) onChange(fromDate(picked));
+      },
+    });
   return (
     <View style={{ gap: space.sm }}>
       <Txt variant="label" bold>{label}</Txt>
       <ChipRow>
-        <Chip label={t('today')} selected={!other && value === today} onPress={() => { setOther(false); onChange(today); }} />
-        <Chip label={t('yesterday')} selected={!other && value === yesterday} onPress={() => { setOther(false); onChange(yesterday); }} />
-        <Chip label={t('otherDate')} selected={other} onPress={() => setOther(true)} />
+        <Chip label={t('today')} selected={value === today} onPress={() => onChange(today)} />
+        <Chip label={t('yesterday')} selected={value === yesterday} onPress={() => onChange(yesterday)} />
+        <Chip icon="calendar" label={isOther ? formatDateLong(value, lang) : t('otherDate')} selected={isOther} onPress={openCalendar} />
       </ChipRow>
-      {other ? (
-        <Field
-          label={t('otherDate')} value={text} keyboardType="numbers-and-punctuation" placeholder="2026-10-06"
-          hint={t('dateFormatHint')} error={bad && text.length >= 10 ? t('dateFormatHint') : null}
-          onChangeText={(v) => { setText(v); if (isISODate(v) && v <= today) onChange(v); }}
-        />
-      ) : null}
     </View>
   );
 }
