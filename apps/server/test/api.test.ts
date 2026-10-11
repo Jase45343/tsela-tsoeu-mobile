@@ -307,7 +307,12 @@ describe('account closure (FR-037)', () => {
     const op = await newOperator('62000020');
     await call('POST', '/v1/account/close', {}, op.token);
     assert.equal((await call('POST', '/v1/sync', { deviceId: op.deviceId, cursor: 0 }, op.token)).body.error, 'account_closed');
-    await call('POST', '/v1/account/reopen', {}, op.token);
+    // Signing in to a closed account works and says it is closed, so the app can offer to reopen it.
+    const login = await call('POST', '/v1/auth/login', { phone: '62000020', pin: '482915' });
+    assert.equal(login.status, 200);
+    assert.ok(login.body.user.closedAt);
+    const reopened = await call('POST', '/v1/account/reopen', {}, login.body.token);
+    assert.equal(reopened.body.closedAt, null);
     assert.equal((await call('POST', '/v1/sync', { deviceId: op.deviceId, cursor: 0 }, op.token)).status, 200);
     await call('POST', '/v1/account/close', {}, op.token);
     assert.equal(await purgeClosedAccounts(db, new Date(Date.now() + 89 * 86_400_000)), 0);

@@ -47,7 +47,14 @@ export interface PaymentInput {
   note?: string;
 }
 
-type AuthUser = RemoteSettings & { id: string; name: string; phone: string };
+type AuthUser = RemoteSettings & { id: string; name: string; phone: string; closedAt?: string | null };
+
+/** Thrown at sign-in when the account was closed; the sign-in screen offers to reopen it. */
+export class AccountClosedError extends Error {
+  constructor(public closedAt: string) {
+    super('account_closed');
+  }
+}
 interface AuthResponse { token: string; user: AuthUser }
 
 const DAY = 86_400_000;
@@ -191,7 +198,13 @@ function useAppState() {
   }, [lockMinutes, refresh, scheduleSync, sync]);
 
   /* ----- auth ----- */
+  const closedLogin = useRef<{ res: AuthResponse; pin: string } | null>(null);
+
   const completeAuth = useCallback(async (res: AuthResponse, pin: string) => {
+    if (res.user.closedAt) {
+      closedLogin.current = { res, pin };
+      throw new AccountClosedError(res.user.closedAt);
+    }
     const d = db();
     const previous = await getMeta(d, 'user_id');
     if (previous && previous !== res.user.id) await wipe(d); // another operator's data never mixes
@@ -428,6 +441,23 @@ function useAppState() {
     }
   }, [profile]);
 
+  /** Reopen an account closed within the last 90 days, from the sign-in screen. */
+  const reopenAndSignIn = useCallback(async () => {
+    const pending = closedLogin.current;
+    if (!pending) throw new Error('Sign in again first.');
+    const user = await api<AuthUser>('/v1/account/reopen', { body: {}, token: pending.res.token });
+    closedLogin.current = null;
+    await completeAuth({ token: pending.res.token, user }, pending.pin);
+  }, [completeAuth]);
+
+  /** Reopen from the sync banner when the account was closed on another phone. */
+  const reopenSignedIn = useCallback(async () => {
+    await api('/v1/account/reopen', { body: {}, token: await getToken() });
+    setSyncProblem(null);
+    setSyncMessage(null);
+    await sync();
+  }, [sync]);
+
   const closeAccount = useCallback(async () => {
     await api('/v1/account/close', { body: {}, token: await getToken() });
     await signOut();
@@ -437,7 +467,7 @@ function useAppState() {
     status, lang, setLang, profile, settings, today, lastMethod, lockMinutes, setLockMinutes,
     snapshot, accounts, accountById, unsyncedStudents, toReview,
     sync, syncing, syncProblem, syncMessage, lastSyncAt, daysSinceSync, pendingCount, failedCount, retryFailed,
-    register, login, requestReset, confirmReset, unlock, signOut, closeAccount, updateRemoteSettings,
+    register, login, requestReset, confirmReset, unlock, signOut, closeAccount, reopenAndSignIn, reopenSignedIn, updateRemoteSettings,
     addStudent, updateStudent, setPeriodCancelled, adjustCharge, adjustCharges, recordPayment, voidPayment, correctPayment, returnPaidAhead, writeOff, markAckShared,
   };
 }

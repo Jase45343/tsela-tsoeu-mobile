@@ -195,7 +195,7 @@ const S = {
   signOut: ['Sign out', 'Tsoa'],
   signOutPending: ['{n} records have not synced. Signing out deletes them from this phone. Sync first.', 'Lirekoto tse {n} ha li so hokahanngoe. Ho tsoa ho tla li hlakola fonong ena. Hokahanya pele.'],
   closeAccount: ['Close account', 'Koala akhaonto'],
-  closeAccountInfo: ['Your records are kept for 90 days, then deleted for good. Export them first.', 'Lirekoto li bolokoa matsatsi a 90, ebe lia hlakoloa. Li romele pele.'],
+  closeAccountInfo: ['Your records are kept for 90 days, then deleted for good. You can reopen the account by signing in before then. Export your records first if you need a copy.', 'Lirekoto li bolokoa matsatsi a 90, ebe lia hlakoloa. U ka bula akhaonto hape ka ho kena pele ho moo. Romela lirekoto pele haeba u hloka kopi.'],
   appVersion: ['Version {v}', 'Phetolelo {v}'],
 
   // sync (FR-032..FR-034)
@@ -325,6 +325,10 @@ const S = {
   paidAheadListHint: ['Families who have paid for months that have not been charged yet.', 'Malapa a lefileng likhoeli tse so lefisoeng.'],
   nobodyPaidAhead: ['Nobody has paid ahead.', 'Ha ho ea lefileng esale pele.'],
   coversNextOnly: ['Part of next month', 'Karolo ea khoeli e tlang'],
+  // reopening a closed account
+  accountClosedTitle: ['This account is closed', 'Akhaonto ena e koetsoe'],
+  accountClosedBody: ['It was closed on {closed}. Your records are kept until {until}. Reopen it to carry on where you left off.', 'E koetsoe ka {closed}. Lirekoto li bolokiloe ho fihlela ka {until}. E bule hape ho tsoela pele moo u emisitseng teng.'],
+  reopenAccount: ['Reopen account', 'Bula akhaonto hape'],
 } as const satisfies Record<string, readonly [string, string]>;
 
 export type StringKey = keyof typeof S;

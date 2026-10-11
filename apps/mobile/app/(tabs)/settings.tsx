@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, View } from 'react-native';
 import { router } from 'expo-router';
-import Constants from 'expo-constants';
+import { APP_VERSION } from '../../src/lib/version';
 import { useApp } from '../../src/data/AppContext';
 import { useT } from '../../src/lib/i18n';
 import { Banner, Btn, Chip, ChipRow, Divider, Field, ListRow, Screen, SectionTitle, Sheet, Txt } from '../../src/ui/kit';
@@ -94,7 +94,7 @@ export default function Settings() {
         <Btn kind="secondary" icon="logout" label={t('signOut')} onPress={signOut} />
         <Btn kind="danger" icon="account-remove-outline" label={t('closeAccount')} onPress={close} />
       </View>
-      <Txt variant="small" tone={color.inkSoft} center>{t('appVersion', { v: Constants.expoConfig?.version ?? '' })}</Txt>
+      <Txt variant="small" tone={color.inkSoft} center>{t('appVersion', { v: APP_VERSION })}</Txt>
     </Screen>
   );
 }

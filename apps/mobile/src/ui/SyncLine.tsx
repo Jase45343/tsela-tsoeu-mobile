@@ -15,7 +15,9 @@ export function SyncLine() {
   return (
     <View style={{ gap: space.sm }}>
       {app.syncProblem === 'auth' ? <Banner tone="danger" text={t('signInToSync')} action={{ label: t('signIn'), onPress: () => router.push('/sign-in?reauth=1') }} /> : null}
-      {app.syncProblem === 'closed' ? <Banner tone="danger" text={app.syncMessage ?? ''} /> : null}
+      {app.syncProblem === 'closed' ? (
+        <Banner tone="danger" text={t('accountClosedTitle')} action={{ label: t('reopenAccount'), onPress: () => void app.reopenSignedIn() }} />
+      ) : null}
       {days !== null && days >= 30 ? <Banner tone="danger" icon="cloud-off-outline" text={t('offline30', { n: days })} />
         : days !== null && days >= 7 ? <Banner tone="warn" icon="cloud-off-outline" text={t('offline7', { n: days })} /> : null}
       {app.failedCount ? <Banner tone="danger" text={t('failedCount', { n: app.failedCount })} action={{ label: t('syncStatus'), onPress: () => router.push('/sync') }} /> : null}

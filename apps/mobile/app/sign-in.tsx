@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { normalizeLesothoPhone, type Lang } from '@busledger/core';
-import { useApp } from '../src/data/AppContext';
+import { addDays, formatDateLong, normalizeLesothoPhone, todayInMaseru, type Lang } from '@busledger/core';
+import { AccountClosedError, useApp } from '../src/data/AppContext';
 import { ApiError } from '../src/sync/api';
 import { useT } from '../src/lib/i18n';
-import { Banner, Btn, Field, Icon, Screen, Txt, type IconName } from '../src/ui/kit';
+import { Banner, Btn, Field, Icon, Screen, Sheet, Txt, type IconName } from '../src/ui/kit';
 import { color, font, radius, space } from '../src/ui/theme';
 
 const LOGO_ON_DARK = require('../assets/logo-on-dark.png');
@@ -29,6 +29,7 @@ export default function SignIn() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [touched, setTouched] = useState(false);
+  const [closedAt, setClosedAt] = useState<string | null>(null);
 
   if (app.status === 'ready' && !reauth) return <Redirect href="/" />;
 
@@ -43,6 +44,10 @@ export default function SignIn() {
       await fn();
       if (reauth) router.back();
     } catch (e) {
+      if (e instanceof AccountClosedError) {
+        setClosedAt(e.closedAt);
+        return;
+      }
       setError(e instanceof ApiError && e.status === 0 ? t('needInternetFirst') : e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -58,7 +63,8 @@ export default function SignIn() {
     return run(() => app.confirmReset(phone, code, pin));
   };
 
-  const switchMode = (m: Mode) => { setMode(m); setError(null); setTouched(false); setCodeSent(false); setPin(''); };
+  const switchMode = (m: Mode) => { setMode(m); setError(null); setTouched(false); setCodeSent(false); setPin(''); setClosedAt(null); };
+  const closedDay = closedAt ? todayInMaseru(new Date(closedAt)) : null;
 
   const langSwitch = (
     <View style={s.langRow}>
@@ -135,17 +141,28 @@ export default function SignIn() {
         </View>
       </View>
       <Screen
-        footer={
+        footer={closedAt ? (
+          <>
+            <Btn kind="primary" icon="account-reactivate" busy={busy} label={t('reopenAccount')} onPress={() => void run(() => app.reopenAndSignIn())} />
+            <Btn kind="quiet" label={t('cancel')} onPress={() => switchMode('signIn')} />
+          </>
+        ) : (
           <>
             <Btn kind="primary" busy={busy} onPress={submit}
               label={mode === 'signIn' ? t('signIn') : mode === 'register' ? t('createAccount') : codeSent ? t('setPin') : t('sendCode')} />
             {mode === 'signIn' ? <Btn kind="quiet" label={t('newHere')} onPress={() => switchMode('register')} />
               : <Btn kind="quiet" label={t('haveAccount')} onPress={() => switchMode('signIn')} />}
           </>
-        }
+        )}
       >
         <Txt variant="title">{mode === 'signIn' ? t('signIn') : mode === 'register' ? t('createAccount') : t('forgotPin')}</Txt>
         {error ? <Banner tone="danger" text={error} /> : null}
+        {closedDay ? (
+          <Sheet>
+            <Txt variant="heading" bold>{t('accountClosedTitle')}</Txt>
+            <Txt>{t('accountClosedBody', { closed: formatDateLong(closedDay, lang), until: formatDateLong(addDays(closedDay, 90), lang) })}</Txt>
+          </Sheet>
+        ) : null}
         {mode === 'register' ? (
           <>
             <Field label={t('yourName')} value={name} onChangeText={setName} autoCapitalize="words" error={touched && !name.trim() ? t('required') : null} />
