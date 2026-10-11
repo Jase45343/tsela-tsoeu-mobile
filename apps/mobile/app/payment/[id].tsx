@@ -51,6 +51,30 @@ export default function PaymentDetail() {
     setVoiding(false);
   };
 
+  if (payment.source === 'write_off') {
+    return (
+      <Screen>
+        <Stack.Screen options={{ title: t('writtenOff') }} />
+        {payment.voidedAt ? <Banner tone="danger" icon="cancel" text={`${t('voided')}: ${payment.voidReason ?? ''}`} /> : null}
+        <Sheet>
+          <Txt variant="heading" bold>{account.student.name}</Txt>
+          <Txt>{t('writtenOffAmount', { amount: formatMaloti(payment.amount) })} · {payment.writeOffPeriodId ? periodName(payment.writeOffPeriodId) : ''}</Txt>
+          <Txt variant="small" tone={color.inkSoft}>{formatDateLong(payment.paymentDate, lang)} · {payment.note}</Txt>
+        </Sheet>
+        <Banner tone="info" text={t('writeOffNotCash')} />
+        {!payment.voidedAt ? (
+          voiding ? (
+            <Sheet>
+              <Field label={t('undoReason')} value={reason} onChangeText={setReason} autoFocus />
+              <Btn kind="danger" label={t('undoWriteOff')} onPress={doVoid} busy={busy} disabled={!reason.trim()} />
+              <Btn kind="quiet" label={t('cancel')} onPress={() => setVoiding(false)} />
+            </Sheet>
+          ) : <Btn kind="secondary" icon="undo" label={t('undoWriteOff')} onPress={() => setVoiding(true)} />
+        ) : null}
+      </Screen>
+    );
+  }
+
   return (
     <Screen footer={isNew ? <Btn kind="secondary" label={t('done')} onPress={() => router.dismissTo('/')} /> : undefined}>
       <Stack.Screen options={{ title: ack?.number ?? t('kindPayment') }} />
@@ -90,7 +114,7 @@ export default function PaymentDetail() {
             ))}
             {allocations.filter((a) => a.target === 'adjustment').map((a) => (
               <View key={a.targetId} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Txt>{t('creditAdjustmentLabel')}</Txt><Txt bold>{formatMaloti(a.amount)}</Txt>
+                <Txt>{t('returnedToParent')}</Txt><Txt bold>{formatMaloti(a.amount)}</Txt>
               </View>
             ))}
             {creditPart > 0 ? (

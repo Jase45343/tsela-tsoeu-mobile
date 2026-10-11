@@ -31,9 +31,9 @@ export interface PeriodRow {
 }
 export interface PaymentRow {
   id: string; student_id: string; amount: number; method: string; payment_date: string; reference: string | null;
-  note: string | null; source: 'manual' | 'voice'; idempotency_key: string; acknowledgement_number: string | null;
+  note: string | null; source: 'manual' | 'voice' | 'write_off'; idempotency_key: string; acknowledgement_number: string | null;
   created_at: string; voided_at: string | null; void_reason: string | null; corrects_payment_id: string | null;
-  long_offline: boolean; server_seq: number;
+  long_offline: boolean; write_off_period_id: string | null; server_seq: number;
 }
 export interface AdjustmentRow {
   id: string; student_id: string; type: CreditAdjustment['type']; amount: number; reason: string; created_at: string; server_seq: number;
@@ -53,6 +53,7 @@ export const toPayment = (r: PaymentRow): Payment => ({
   id: r.id, studentId: r.student_id, amount: r.amount, method: r.method, paymentDate: r.payment_date,
   reference: r.reference, note: r.note, source: r.source, createdAt: r.created_at, voidedAt: r.voided_at,
   voidReason: r.void_reason, correctsPaymentId: r.corrects_payment_id, acknowledgementNumber: r.acknowledgement_number,
+  writeOffPeriodId: r.write_off_period_id,
 });
 export const toAdjustment = (r: AdjustmentRow): CreditAdjustment => ({
   id: r.id, studentId: r.student_id, type: r.type, amount: r.amount, reason: r.reason, createdAt: r.created_at,

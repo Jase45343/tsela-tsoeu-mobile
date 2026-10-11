@@ -44,9 +44,14 @@ export interface StudentAccount {
   outstanding: Lisente;
   /** Sum of balances on overdue periods. */
   arrears: Lisente;
+  /** Paid ahead and not yet counted toward any month (can be returned to the parent). */
   credit: Lisente;
   /** Paid towards months that have not begun yet. */
   prepaid: Lisente;
+  /** Everything the family has paid ahead: credit + prepaid. Shown to drivers as "Paid ahead". */
+  paidAhead: Lisente;
+  /** Owed but forgiven by the driver, across all months. */
+  writtenOff: Lisente;
   /** outstanding − credit − prepaid; negative means the family is ahead. */
   net: Lisente;
   status: AccountStatus;
@@ -111,6 +116,8 @@ export function buildStudentAccount(args: {
     arrears,
     credit: ledger.credit,
     prepaid,
+    paidAhead: ledger.credit + prepaid,
+    writtenOff: ledger.totalWrittenOff,
     net: outstanding - ledger.credit - prepaid,
     status: accountStatusFor(arrears, ledger.credit + prepaid),
     maxDaysOverdue: maxDays,

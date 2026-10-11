@@ -1,4 +1,4 @@
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { compareByUrgency, currentMonth, formatMaloti, formatMonth, summarizeMonth } from '@busledger/core';
@@ -50,7 +50,10 @@ export default function Home() {
           <Figure label={t('arrearsEarlier')} value={formatMaloti(s.arrearsEarlier)} tone={s.arrearsEarlier > 0 ? color.owing : color.ink} />
           <View style={{ flexDirection: 'row', gap: space.lg }}>
             <View style={{ flex: 1 }}><Figure label={t('receivedIn', { month: monthLabel })} value={formatMaloti(s.received)} /></View>
-            <View style={{ flex: 1 }}><Figure label={t('creditHeld')} value={formatMaloti(s.totalCredit)} /></View>
+            <Pressable accessibilityRole="button" onPress={() => router.push('/paid-ahead')} style={{ flex: 1 }}>
+              <Figure label={t('paidAheadTotal')} value={formatMaloti(s.totalPaidAhead)} tone={s.totalPaidAhead ? color.paid : color.ink} />
+              <Txt variant="small" bold tone={color.brand}>{t('seeAll')}</Txt>
+            </Pressable>
           </View>
           {star ? <Txt variant="small" tone={color.inkSoft}>{t('provisionalNote')}</Txt> : null}
         </Sheet>

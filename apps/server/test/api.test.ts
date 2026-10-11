@@ -154,7 +154,7 @@ describe('sync and bookkeeping', () => {
   it('turns an overpayment into credit, guards credit adjustments, and supports cancellation (FR-010, FR-039)', async () => {
     await sync({ payments: [paymentDto(studentId, M(1200), '2026-10-04')] }); // Oct full (700 left) → 500 credit
     const tooMuch = await sync({ creditAdjustments: [{ id: randomUUID(), studentId, type: 'refunded_outside_app', amount: M(600), reason: 'Refund', createdAt: clock.toISOString() }] });
-    assert.equal(tooMuch.results[0].reason, 'exceeds_credit');
+    assert.equal(tooMuch.results[0].reason, 'exceeds_paid_ahead');
 
     const octId = (await db.query<{ id: string }>('SELECT id FROM billing_periods WHERE student_id = $1 AND month = 10', [studentId])).rows[0]!.id;
     const cancel = await sync({
@@ -167,7 +167,7 @@ describe('sync and bookkeeping', () => {
     const refund = await sync({ creditAdjustments: [{ id: randomUUID(), studentId, type: 'refunded_outside_app', amount: M(1500), reason: 'Left school; returned prepayment', createdAt: clock.toISOString() }] });
     assert.equal(refund.results[0].status, 'ok');
     const report = await call('GET', '/v1/reports/monthly?year=2026&month=10', undefined, op.token);
-    assert.equal(report.body.totalCredit, 0);
+    assert.equal(report.body.totalPaidAhead, 0);
     assert.equal(report.body.cancelled, 1);
     assert.equal(report.body.creditAdjustmentsTotal, M(1500));
   });
@@ -201,7 +201,7 @@ describe('sync and bookkeeping', () => {
     const r = await call('GET', '/v1/export/payments.csv', undefined, op.token);
     assert.equal(r.status, 200);
     assert.match(r.body as string, /^payment_id,acknowledgement,student,amount/);
-    assert.match(r.body as string, /2026-08:500\.00 2026-09:1000\.00 adjustment:200\.00/);
+    assert.match(r.body as string, /2026-08:500\.00 2026-09:1000\.00 returned:200\.00/);
   });
 });
 
@@ -257,6 +257,47 @@ describe('billing rules and school calendars', () => {
     const jan = (await sync()).periods.find((p: any) => p.month === 1);
     assert.equal(jan.amountDue, M(429)); // 9 of 21 school days, whole maloti
     assert.equal(jan.needsReview, false);
+    clock = new Date('2026-10-06T08:00:00Z');
+  });
+});
+
+describe('write-offs and returning paid-ahead money', () => {
+  it('forgives one month with a reason, keeps it out of money received, and can be undone', async () => {
+    const op = await newOperator('62000040');
+    const sid = randomUUID();
+    clock = new Date('2026-10-20T08:00:00Z');
+    let cursor = 0;
+    const sync = async (push: Record<string, unknown[]> = {}) => {
+      const r = await call('POST', '/v1/sync', { deviceId: op.deviceId, cursor, push }, op.token);
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      cursor = r.body.cursor;
+      return r.body;
+    };
+    const first = await sync({ students: [studentDto(sid, { onboardedAt: '2026-09-01' })] });
+    const sep = first.periods.find((p: any) => p.month === 9);
+
+    const base = paymentDto(sid, M(1000), '2026-10-20', { source: 'write_off', method: 'Write-off', writeOffPeriodId: sep.id });
+    const noReason = await sync({ payments: [base] });
+    assert.equal(noReason.results[0].reason, 'reason_required');
+
+    const wo = { ...base, id: randomUUID(), idempotencyKey: `key-${randomUUID()}`, note: 'Family hardship' };
+    const done = await sync({ payments: [wo] });
+    assert.equal(done.results[0].status, 'ok');
+    const sepAfter = done.periods.find((p: any) => p.month === 9);
+    assert.equal(sepAfter.balance, 0);
+    assert.equal(sepAfter.amountRecorded, 0); // forgiven, not received
+    const report = await call('GET', '/v1/reports/monthly?year=2026&month=9', undefined, op.token);
+    assert.equal(report.body.writtenOff, M(1000));
+    assert.equal(report.body.recorded, 0);
+    const daily = await call('GET', '/v1/reports/daily?date=2026-10-20', undefined, op.token);
+    assert.equal(daily.body.total, 0);
+
+    const undone = await sync({ payments: [{ ...wo, voidedAt: clock.toISOString(), voidReason: 'Parent paid after all' }] });
+    assert.equal(undone.periods.find((p: any) => p.month === 9).balance, M(1000));
+
+    // Paid-ahead money can only be returned, never written off.
+    const bad = await sync({ creditAdjustments: [{ id: randomUUID(), studentId: sid, type: 'written_off', amount: M(100), reason: 'x', createdAt: clock.toISOString() }] });
+    assert.equal(bad.results[0].status, 'rejected');
     clock = new Date('2026-10-06T08:00:00Z');
   });
 });

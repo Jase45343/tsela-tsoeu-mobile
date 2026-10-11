@@ -16,7 +16,8 @@ export function studentsCsv(accounts: StudentAccount[]): string {
     { header: 'status', value: (a) => a.student.status },
     { header: 'outstanding', value: (a) => csvAmount(a.outstanding) },
     { header: 'arrears', value: (a) => csvAmount(a.arrears) },
-    { header: 'credit', value: (a) => csvAmount(a.credit) },
+    { header: 'paid_ahead', value: (a) => csvAmount(a.paidAhead) },
+    { header: 'written_off', value: (a) => csvAmount(a.writtenOff) },
     { header: 'account_status', value: (a) => a.status },
   ]);
 }
@@ -27,7 +28,7 @@ export function paymentsCsv(accounts: StudentAccount[]): string {
     return a.payments.map((p) => {
       const allocated = a.ledger.allocations
         .filter((x) => x.paymentId === p.id)
-        .map((x) => `${x.target === 'period' ? periodLabel.get(x.targetId) ?? x.targetId : 'adjustment'}:${csvAmount(x.amount)}`)
+        .map((x) => `${x.target === 'period' ? periodLabel.get(x.targetId) ?? x.targetId : 'returned'}:${csvAmount(x.amount)}`)
         .join(' ');
       return { a, p, allocated };
     });

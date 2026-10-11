@@ -38,7 +38,7 @@ const S = {
   outstandingFor: ['Still owed for {month}', 'E ntseng e kolotoa bakeng sa {month}'],
   arrearsEarlier: ['Overdue from earlier months', 'E salletseng ea likhoeli tse fetileng'],
   receivedIn: ['Cash received in {month}', 'Chelete e amohetsoeng ka {month}'],
-  creditHeld: ['Paid ahead (credit)', 'E lefetsoeng esale pele'],
+  paidAheadTotal: ['Paid ahead', 'E lefetsoeng esale pele'],
   provisionalNote: ['Includes records not yet confirmed online.', 'Ho kenyeletsa tse so netefatsoeng inthaneteng.'],
   mostOverdue: ['Most overdue', 'Ba salletsoeng haholo'],
   nobodyOverdue: ['Nobody is overdue.', 'Ha ho ea salletsoeng.'],
@@ -94,13 +94,13 @@ const S = {
   noPayments: ['No payments recorded yet.', 'Ha ho tefo e ngolisitsoeng.'],
   recordedOf: ['{a} of {b}', '{a} ho {b}'],
   sendReminder: ['Send reminder', 'Romela khopotso'],
-  settleCredit: ['Settle credit', 'Lokisa chelete e lefetsoeng esale pele'],
+  returnPaidAhead: ['Return paid-ahead money', 'Khutlisa chelete e lefetsoeng esale pele'],
   studentLeft: ['Student has left', 'Seithuti se tlohile'],
   makeActive: ['Make active again', 'Khutlisetsa seithuti'],
   dontCharge: ["Don't charge this month", 'Se lefise khoeli ena'],
   chargeAgain: ['Charge this month again', 'Lefisa khoeli ena hape'],
-  leftCreditPrompt: ['{name} has {amount} paid ahead. Record what happened to it.', '{name} o na le {amount} e lefetsoeng esale pele. Ngola hore na e entsoe joang.'],
-  creditAdjustmentLabel: ['Credit settled', 'Chelete e lokisitsoe'],
+  leftPaidAheadPrompt: ['{name} has left with {amount} paid ahead. If you gave it back, record it here.', '{name} o tlohile a na le {amount} e lefetsoeng esale pele. Haeba u e khutlisitse, e ngole mona.'],
+  returnedToParent: ['Returned to parent', 'E khutliselitsoe motsoali'],
 
   // record payment (FR-011, FR-014)
   whoPaid: ['Who paid?', 'Ke mang ea lefileng?'],
@@ -139,13 +139,27 @@ const S = {
   allocatedTo: ['Counted toward', 'E baliloe ho'],
   creditPart: ['paid ahead', 'esale pele'],
 
-  // credit adjustment (FR-039)
-  available: ['Available credit: {amount}', 'Chelete e lefetsoeng esale pele: {amount}'],
-  adjRefunded: ['Money returned to parent', 'Chelete e khutliselitsoe motsoali'],
-  adjWrittenOff: ['Written off', 'E tlohetsoe'],
-  adjOther: ['Other', 'Tse ling'],
-  adjReason: ['What happened?', 'Ho etsahetse eng?'],
-  adjTooMuch: ['That is more than the available credit.', 'Sena se feta chelete e teng.'],
+  // returning paid-ahead money (FR-039)
+  paidAheadAvailable: ['Paid ahead: {amount}', 'E lefetsoeng esale pele: {amount}'],
+  returnHint: ['Record money you gave back to the parent. Paid-ahead money you keep is used for the coming months automatically.', 'Ngola chelete eo u e khutliselitseng motsoali. Chelete e lefetsoeng esale pele eo u e bolokang e sebelisoa likhoeling tse tlang.'],
+  amountReturned: ['Amount returned (M)', 'Chelete e khutlisitsoeng (M)'],
+  returnNote: ['Note, e.g. how and when it was returned', 'Tlhaloso, mohl. e khutlisitsoe joang le neng'],
+  returnTooMuch: ['That is more than the paid-ahead amount.', 'Sena se feta chelete e lefetsoeng esale pele.'],
+  saveReturn: ['Save', 'Boloka'],
+
+  // writing off what's owed
+  writeOff: ["Write off what's owed", 'Tlohela chelete e kolotoang'],
+  writeOffHint: ['Use this when you have decided not to collect money a parent owes for this month. It is not money received, and you can undo it later.', 'Sebelisa sena ha u nkile qeto ea ho se bokelle chelete eo motsoali a e kolotang bakeng sa khoeli ena. Hase chelete e amohetsoeng, ’me u ka e khutlisa hamorao.'],
+  owedFor: ['Owed for {month}: {amount}', 'E kolotoang bakeng sa {month}: {amount}'],
+  amountWrittenOff: ['Amount to write off (M)', 'Chelete e tlohelloang (M)'],
+  writeOffTooMuch: ['That is more than is owed for this month.', 'Sena se feta se kolotoang khoeling ena.'],
+  writeOffReason: ['Why are you writing it off?', 'Hobaneng u e tlohela?'],
+  saveWriteOff: ['Write off', 'Tlohela'],
+  writtenOff: ['Written off', 'E tlohetsoe'],
+  writtenOffAmount: ['{amount} written off', '{amount} e tlohetsoe'],
+  undoWriteOff: ['Undo write-off', 'Hlakola ho tlohela'],
+  undoReason: ['Why are you undoing it?', 'Hobaneng u e hlakola?'],
+  writeOffNotCash: ['Not money received. The parent no longer owes this amount.', 'Hase chelete e amohetsoeng. Motsoali ha a sa kolota chelete ena.'],
   saveAdjustment: ['Save', 'Boloka'],
 
   // reminders (FR-025)
@@ -167,7 +181,7 @@ const S = {
   exportCsv: ['Export to spreadsheet (CSV)', 'Romela ho spreadsheet (CSV)'],
   exportStudents: ['Students', 'Liithuti'],
   exportPayments: ['Payments', 'Litefo'],
-  exportCredit: ['Credit settled', 'Chelete e lokisitsoeng'],
+  exportReturned: ['Paid-ahead money returned', 'Chelete e khutlisitsoeng'],
 
   // settings (NFR-010)
   business: ['Business name', 'Lebitso la khoebo'],
@@ -228,7 +242,7 @@ const S = {
   kindStudent: ['Student', 'Seithuti'],
   kindPeriod: ['Month', 'Khoeli'],
   kindPayment: ['Payment', 'Tefo'],
-  kindAdjustment: ['Credit settled', 'Chelete e lokisitsoeng'],
+  kindAdjustment: ['Returned to parent', 'E khutliselitsoe motsoali'],
   kindAck: ['Acknowledgement', 'Netefatso'],
   forgotPinLocked: ['Forgot your PIN? Sign out and sign in again with a new PIN.', 'U lebetse PIN? Tsoa ebe u kena hape ka PIN e ncha.'],
   // welcome (Tsela-Tšoeu)
@@ -292,6 +306,25 @@ const S = {
   chargeExplain: ['The change is kept in the history with your reason.', 'Phetoho e bolokoa historing hammoho le lebaka la hau.'],
   notStarted: ['Not started', 'Ha e so qale'],
   choiceProrata: ['School days left', 'Matsatsi a setseng'],
+  // looking ahead
+  comingMonths: ['Coming months', 'Likhoeli tse tlang'],
+  coveredUntil: ['Paid up to the end of {month}', 'E lefetsoe ho fihlela qetellong ea {month}'],
+  coveredFull: ['Covered', 'E lefetsoe'],
+  coveredPart: ['{covered} of {charge} covered', '{covered} ho {charge} e lefetsoe'],
+  toCollect: ['{amount} to collect', '{amount} e lokelang ho bokelloa'],
+  estimated: ['estimate', 'khakanyo'],
+  forecastNote: ['Estimated with your billing rules. Months are charged on the 1st, so these can still change.', 'E hakantsoe ka melao ea hau ea tefo. Likhoeli li lefisoa ka la 1, kahoo li ka fetoha.'],
+  expectedIn: ['Expected for {month}', 'E lebelletsoeng bakeng sa {month}'],
+  alreadyPaidAhead: ['Already paid ahead', 'E seng e lefetsoe esale pele'],
+  stillToCollect: ['Still to collect', 'E ntseng e lokelang ho bokelloa'],
+  nCovered: ['{n} covered', 'Ba {n} ba lefile'],
+  nPartly: ['{n} partly covered', 'Ba {n} ba lefile karolo'],
+  nNotYet: ['{n} not yet', 'Ba {n} ha ba so lefe'],
+  nDecide: ['{n} holiday charges to decide when the month starts', 'Litefo tse {n} tsa phomolo li tla emela qeto ha khoeli e qala'],
+  paidAheadList: ['Paid ahead', 'Ba lefileng esale pele'],
+  paidAheadListHint: ['Families who have paid for months that have not been charged yet.', 'Malapa a lefileng likhoeli tse so lefisoeng.'],
+  nobodyPaidAhead: ['Nobody has paid ahead.', 'Ha ho ea lefileng esale pele.'],
+  coversNextOnly: ['Part of next month', 'Karolo ea khoeli e tlang'],
 } as const satisfies Record<string, readonly [string, string]>;
 
 export type StringKey = keyof typeof S;

@@ -34,7 +34,7 @@ export function acknowledgementPlainText(d: AcknowledgementData, lang: Lang): st
 }
 
 /** FR-029: export works offline from the data on the phone. */
-export async function shareCsv(kind: 'students' | 'payments' | 'credit', accounts: StudentAccount[]): Promise<void> {
+export async function shareCsv(kind: 'students' | 'payments' | 'returned', accounts: StudentAccount[]): Promise<void> {
   const csv = kind === 'students' ? studentsCsv(accounts) : kind === 'payments' ? paymentsCsv(accounts) : creditAdjustmentsCsv(accounts);
   const file = new File(Paths.cache, `tsela-tsoeu-${kind}-${new Date().toISOString().slice(0, 10)}.csv`);
   if (file.exists) file.delete();

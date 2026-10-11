@@ -39,7 +39,7 @@ export default function Record() {
   // Recently paid first, so a returning student is one tap away.
   const candidates = useMemo(() => {
     const last = new Map<string, string>();
-    for (const p of app.snapshot.payments) if ((last.get(p.studentId) ?? '') < p.createdAt) last.set(p.studentId, p.createdAt);
+    for (const p of app.snapshot.payments) if (p.source !== 'write_off' && (last.get(p.studentId) ?? '') < p.createdAt) last.set(p.studentId, p.createdAt);
     return app.accounts
       .filter((a) => a.student.status === 'active' && matchesStudent(a, query.trim()))
       .sort((a, b) => (last.get(b.student.id) ?? '').localeCompare(last.get(a.student.id) ?? '') || a.student.name.localeCompare(b.student.name));

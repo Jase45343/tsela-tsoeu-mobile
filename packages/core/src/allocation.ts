@@ -19,13 +19,15 @@ import type {
 export interface Ledger {
   allocations: Allocation[];
   periods: Map<string, PeriodState>;
-  /** Recorded money not allocated to any period or adjustment (an advance). */
+  /** Money received but not yet counted toward any month: paid ahead. (Internally called credit.) */
   credit: Lisente;
   /** How much of each credit adjustment was actually covered by credit. */
   adjustmentsCovered: Map<string, Lisente>;
   /** Credit adjustments that exceed the credit available at their point in the sequence. */
   unfundedAdjustmentIds: string[];
+  /** Money received (write-offs excluded). */
   totalRecorded: Lisente;
+  totalWrittenOff: Lisente;
 }
 
 interface Sink {
@@ -49,10 +51,10 @@ function comparePayments(a: Payment, b: Payment): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
-export function periodStatusFor(amountDue: Lisente, recorded: Lisente, cancelled: boolean): PeriodStatus {
+export function periodStatusFor(amountDue: Lisente, recorded: Lisente, cancelled: boolean, writtenOff = 0): PeriodStatus {
   if (cancelled) return 'cancelled';
-  if (recorded >= amountDue) return 'paid';
-  if (recorded > 0) return 'partial';
+  if (recorded + writtenOff >= amountDue) return 'paid';
+  if (recorded > 0 || writtenOff > 0) return 'partial';
   return 'unpaid';
 }
 
@@ -64,20 +66,37 @@ export function computeLedger(input: {
   // Sinks absorb recorded money in chronological order: every non-cancelled
   // period by its start date, and every credit adjustment at the date it was
   // made, so a refund of credit is taken before any later period could use it.
+  const allocations: Allocation[] = [];
+
+  // Write-offs first: each forgives part of one specific month, never more than
+  // that month's charge, and never turns into paid-ahead money.
+  const writtenOff = new Map<string, Lisente>();
+  const periodById = new Map(input.periods.map((p) => [p.id, p]));
+  let totalWrittenOff = 0;
+  for (const w of input.payments.filter((p) => !p.voidedAt && p.source === 'write_off').sort(comparePayments)) {
+    const target = w.writeOffPeriodId ? periodById.get(w.writeOffPeriodId) : undefined;
+    if (!target || target.cancelled) continue;
+    const used = writtenOff.get(target.id) ?? 0;
+    const take = Math.min(w.amount, target.amountDue - used);
+    if (take <= 0) continue;
+    writtenOff.set(target.id, used + take);
+    allocations.push({ paymentId: w.id, targetId: target.id, target: 'period', amount: take });
+    totalWrittenOff += take;
+  }
+
   const sinks: Sink[] = [];
   for (const p of input.periods) {
     if (p.cancelled) continue;
-    sinks.push({ kind: 'period', id: p.id, sortDate: p.periodStart, rank: 0, tiebreak: `${p.periodStart}|${p.id}`, capacity: p.amountDue });
+    sinks.push({ kind: 'period', id: p.id, sortDate: p.periodStart, rank: 0, tiebreak: `${p.periodStart}|${p.id}`, capacity: p.amountDue - (writtenOff.get(p.id) ?? 0) });
   }
   for (const a of input.adjustments) {
     sinks.push({ kind: 'adjustment', id: a.id, sortDate: a.createdAt.slice(0, 10), rank: 1, tiebreak: `${a.createdAt}|${a.id}`, capacity: a.amount });
   }
   sinks.sort(compareSinks);
 
-  const payments = input.payments.filter((p) => !p.voidedAt).sort(comparePayments);
+  const payments = input.payments.filter((p) => !p.voidedAt && p.source !== 'write_off').sort(comparePayments);
 
   const filled = new Map<string, Lisente>();
-  const allocations: Allocation[] = [];
   let cursor = 0;
   let totalRecorded = 0;
   let unallocated = 0;
@@ -105,11 +124,13 @@ export function computeLedger(input: {
   const periods = new Map<string, PeriodState>();
   for (const p of input.periods) {
     const recorded = p.cancelled ? 0 : filled.get(p.id) ?? 0;
+    const off = p.cancelled ? 0 : writtenOff.get(p.id) ?? 0;
     periods.set(p.id, {
       periodId: p.id,
       amountRecorded: recorded,
-      balance: p.cancelled ? 0 : p.amountDue - recorded,
-      status: periodStatusFor(p.amountDue, recorded, p.cancelled),
+      writtenOff: off,
+      balance: p.cancelled ? 0 : p.amountDue - recorded - off,
+      status: periodStatusFor(p.amountDue, recorded, p.cancelled, off),
     });
   }
 
@@ -121,7 +142,7 @@ export function computeLedger(input: {
     if (covered < a.amount) unfundedAdjustmentIds.push(a.id);
   }
 
-  return { allocations, periods, credit: unallocated, adjustmentsCovered, unfundedAdjustmentIds, totalRecorded };
+  return { allocations, periods, credit: unallocated, adjustmentsCovered, unfundedAdjustmentIds, totalRecorded, totalWrittenOff };
 }
 
 /**

@@ -53,7 +53,8 @@ export interface BillingPeriod {
 
 export type PeriodStatus = 'unpaid' | 'partial' | 'paid' | 'cancelled';
 
-export type PaymentSource = 'manual' | 'voice';
+/** write_off: not money received — the driver forgave what was owed for one month (targets writeOffPeriodId). */
+export type PaymentSource = 'manual' | 'voice' | 'write_off';
 
 export interface Payment {
   id: string;
@@ -70,8 +71,15 @@ export interface Payment {
   /** Set on a replacement record created by a correction (FR-016). */
   correctsPaymentId?: string | null;
   acknowledgementNumber?: string | null;
+  /** For a write-off: the month whose debt is forgiven. */
+  writeOffPeriodId?: string | null;
 }
 
+/**
+ * A reduction of paid-ahead money that does not void any payment.
+ * New records are only ever refunded_outside_app ("returned to parent");
+ * written_off and other exist only in data recorded before v1.5.
+ */
 export type CreditAdjustmentType = 'refunded_outside_app' | 'written_off' | 'other';
 
 export interface CreditAdjustment {
@@ -93,7 +101,10 @@ export interface Allocation {
 
 export interface PeriodState {
   periodId: string;
+  /** Money received and counted toward this month. */
   amountRecorded: Lisente;
+  /** Owed for this month but forgiven by the driver. */
+  writtenOff: Lisente;
   balance: Lisente;
   status: PeriodStatus;
 }

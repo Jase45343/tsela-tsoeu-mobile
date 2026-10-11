@@ -78,7 +78,8 @@ export const PaymentDTO = z.object({
   paymentDate: isoDate,
   reference: z.string().trim().max(80).nullable().optional(),
   note: z.string().trim().max(500).nullable().optional(),
-  source: z.enum(['manual', 'voice']),
+  source: z.enum(['manual', 'voice', 'write_off']),
+  writeOffPeriodId: uuid.nullable().optional(),
   createdAt: isoDateTime,
   idempotencyKey: z.string().min(8).max(100),
   acknowledgementNumber: z.string().max(40).nullable().optional(),
@@ -91,7 +92,8 @@ export const PaymentDTO = z.object({
 export const CreditAdjustmentDTO = z.object({
   id: uuid,
   studentId: uuid,
-  type: z.enum(['refunded_outside_app', 'written_off', 'other']),
+  // Paid-ahead money can only be returned to the parent; writing off applies to money owed (a write_off payment).
+  type: z.literal('refunded_outside_app'),
   amount: lisente.refine((v) => v > 0, 'Amount must be more than zero'),
   reason: z.string().trim().min(1).max(300),
   createdAt: isoDateTime,

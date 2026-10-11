@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { router } from 'expo-router';
 import {
-  dailyReport, filterPayments, formatDateLong, formatMaloti, formatMonth, makeDate, daysInMonth, nextMonth, parts, prevMonth, summarizeMonth,
+  compareMonths, dailyReport, filterPayments, formatDateLong, formatMaloti, formatMonth, makeDate, daysInMonth, nextMonth, outlookForMonth, parts, prevMonth, summarizeMonth,
+  FORECAST_MONTHS,
 } from '@busledger/core';
 import { useApp } from '../../src/data/AppContext';
 import { useT } from '../../src/lib/i18n';
@@ -28,7 +29,10 @@ export default function Reports() {
     method: method ?? undefined,
   }), [app.accounts, view, day, ym, method]);
   const names = useMemo(() => new Map(app.accounts.map((a) => [a.student.id, a.student.name])), [app.accounts]);
-  const isCurrent = `${ym.year}-${ym.month}` === `${parts(app.today).year}-${parts(app.today).month}`;
+  const current = parts(app.today);
+  const ahead = (ym.year - current.year) * 12 + (ym.month - current.month);
+  const future = compareMonths(ym, current) > 0;
+  const outlook = useMemo(() => (future ? outlookForMonth(app.accounts, ym.year, ym.month, app.today, app.settings) : null), [future, app.accounts, ym, app.today, app.settings]);
 
   return (
     <Screen>
@@ -61,8 +65,37 @@ export default function Reports() {
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <Btn kind="quiet" icon="chevron-left" label="" onPress={() => setYm(prevMonth(ym.year, ym.month))} />
             <Txt variant="heading" bold>{formatMonth(ym.year, ym.month, lang)}</Txt>
-            <Btn kind="quiet" icon="chevron-right" label="" disabled={isCurrent} onPress={() => setYm(nextMonth(ym.year, ym.month))} />
+            <Btn kind="quiet" icon="chevron-right" label="" disabled={ahead >= FORECAST_MONTHS} onPress={() => setYm(nextMonth(ym.year, ym.month))} />
           </View>
+          {outlook ? (
+            <>
+              <Sheet>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+                  <StatusTag tag="paid" label={t('nCovered', { n: outlook.fullyCovered })} />
+                  {outlook.partlyCovered ? <StatusTag tag="partial" label={t('nPartly', { n: outlook.partlyCovered })} /> : null}
+                  <StatusTag tag="cancelled" label={t('nNotYet', { n: outlook.notCovered })} />
+                </View>
+                <Figure label={t('expectedIn', { month: formatMonth(ym.year, ym.month, lang) })} value={formatMaloti(outlook.expected)} />
+                <Figure label={t('alreadyPaidAhead')} value={formatMaloti(outlook.covered)} tone={outlook.covered ? color.paid : color.ink} />
+                <Figure label={t('stillToCollect')} value={formatMaloti(outlook.toCollect)} />
+                {outlook.needsDecision ? <Txt variant="small" tone={color.partial}>{t('nDecide', { n: outlook.needsDecision })}</Txt> : null}
+                {outlook.estimate ? <Txt variant="small" tone={color.inkSoft}>{t('forecastNote')}</Txt> : null}
+              </Sheet>
+              <Sheet style={{ padding: 0, gap: 0, overflow: 'hidden' }}>
+                {outlook.rows.map(({ account, forecast: f }, i) => (
+                  <View key={account.student.id}>
+                    {i ? <Divider /> : null}
+                    <ListRow
+                      title={account.student.name}
+                      subtitle={f.toCollect === 0 ? t('coveredFull') : f.covered ? t('coveredPart', { covered: formatMaloti(f.covered), charge: formatMaloti(f.charge) }) : t('toCollect', { amount: formatMaloti(f.toCollect) })}
+                      right={f.toCollect === 0 ? <StatusTag tag="paid" label={t('coveredFull')} /> : <Txt variant="label" bold>{formatMaloti(f.toCollect)}</Txt>}
+                      onPress={() => router.push(`/student/${account.student.id}`)}
+                    />
+                  </View>
+                ))}
+              </Sheet>
+            </>
+          ) : (
           <Sheet>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
               <StatusTag tag="paid" label={`${monthly.paid} ${t('paid')}`} />
@@ -74,11 +107,17 @@ export default function Reports() {
             <Figure label={t('recordedFor', { month: formatMonth(ym.year, ym.month, lang) })} value={formatMaloti(monthly.recorded)} />
             <Figure label={t('outstandingFor', { month: formatMonth(ym.year, ym.month, lang) })} value={formatMaloti(monthly.outstanding)} tone={monthly.outstanding ? color.owing : color.paid} />
             <Figure label={t('receivedIn', { month: formatMonth(ym.year, ym.month, lang) })} value={formatMaloti(monthly.received)} />
-            {monthly.creditAdjustmentsCount ? <Figure label={t('exportCredit')} value={formatMaloti(monthly.creditAdjustmentsTotal)} /> : null}
+            {monthly.writtenOff ? <Figure label={t('writtenOff')} value={formatMaloti(monthly.writtenOff)} /> : null}
+            {monthly.creditAdjustmentsCount ? <Figure label={t('exportReturned')} value={formatMaloti(monthly.creditAdjustmentsTotal)} /> : null}
           </Sheet>
+          )}
         </>
       )}
 
+      <Btn kind="secondary" icon="calendar-arrow-right" label={t('paidAheadList')} onPress={() => router.push('/paid-ahead')} />
+
+      {view === 'month' && future ? null : (
+        <>
       <SectionTitle>{t('history')}</SectionTitle>
       <ChipRow>
         <Chip label={t('filterAll')} selected={!method} onPress={() => setMethod(null)} />
@@ -94,11 +133,14 @@ export default function Reports() {
         ))}
       </Sheet>
 
+        </>
+      )}
+
       <SectionTitle>{t('exportCsv')}</SectionTitle>
       <View style={{ gap: space.sm }}>
         <Btn kind="secondary" icon="file-delimited-outline" label={t('exportPayments')} onPress={() => void shareCsv('payments', app.accounts)} />
         <Btn kind="secondary" icon="file-delimited-outline" label={t('exportStudents')} onPress={() => void shareCsv('students', app.accounts)} />
-        <Btn kind="secondary" icon="file-delimited-outline" label={t('exportCredit')} onPress={() => void shareCsv('credit', app.accounts)} />
+        <Btn kind="secondary" icon="file-delimited-outline" label={t('exportReturned')} onPress={() => void shareCsv('returned', app.accounts)} />
       </View>
     </Screen>
   );

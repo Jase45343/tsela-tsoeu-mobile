@@ -49,6 +49,8 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE periods ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE periods ADD COLUMN charge_note TEXT;
    ALTER TABLE periods ADD COLUMN adjust_reason TEXT;`,
+  // v1.5: write-offs are stored as payments with source 'write_off' and the month they forgive.
+  `ALTER TABLE payments ADD COLUMN write_off_period_id TEXT;`,
 ];
 
 let opening: Promise<DB> | null = null;

@@ -111,3 +111,40 @@ describe('months that have not begun', () => {
     assert.equal(later.maxDaysOverdue, 1);
   });
 });
+
+describe('write-offs', () => {
+  const student: Student = {
+    id: 's', name: 'Lineo', parentName: 'P', parentPhone: '+26658123456', school: 'X', pickupLocation: '', dropoffLocation: '',
+    monthlyFee: M(1000), onboardedAt: '2026-08-01', status: 'active',
+  };
+  const per = (m: number) => buildPeriod({ id: `p${m}`, studentId: 's', year: 2026, month: m, amountDue: M(1000), dueDay: 1, origin: 'server' });
+  const cash = (amount: number, date: string, id = `c-${date}`) => ({ id, studentId: 's', amount, method: 'Cash', paymentDate: date, source: 'manual' as const, createdAt: `${date}T08:00:00Z` });
+  const writeOff = (amount: number, periodId: string, over: Record<string, unknown> = {}) => ({
+    id: `w-${periodId}`, studentId: 's', amount, method: 'Write-off', paymentDate: '2026-10-10', source: 'write_off' as const,
+    createdAt: '2026-10-10T08:00:00Z', writeOffPeriodId: periodId, note: 'Family hardship', ...over,
+  });
+
+  it('forgives one specific month, not the oldest', () => {
+    const acc = buildStudentAccount({ student, periods: [per(8), per(9), per(10)], payments: [writeOff(M(1000), 'p9')], adjustments: [], today: '2026-10-20', settings: DEFAULT_SETTINGS });
+    const sep = acc.periods.find((v) => v.period.id === 'p9')!;
+    assert.equal(sep.state.writtenOff, M(1000));
+    assert.equal(sep.state.balance, 0);
+    assert.equal(acc.outstanding, M(2000)); // August and October still owed
+    assert.equal(acc.writtenOff, M(1000));
+  });
+
+  it('never becomes paid-ahead money, and is not money received', () => {
+    const acc = buildStudentAccount({ student, periods: [per(10)], payments: [cash(M(600), '2026-10-02'), writeOff(M(900), 'p10')], adjustments: [], today: '2026-10-20', settings: DEFAULT_SETTINGS });
+    const oct = acc.periods[0]!.state;
+    assert.equal(oct.writtenOff, M(900)); // applied first, capped by the month's charge
+    assert.equal(oct.amountRecorded, M(100));
+    assert.equal(acc.paidAhead, M(500)); // the real cash beyond what was still owed
+    assert.equal(acc.ledger.totalRecorded, M(600));
+  });
+
+  it('can be undone by voiding it', () => {
+    const acc = buildStudentAccount({ student, periods: [per(10)], payments: [writeOff(M(1000), 'p10', { voidedAt: '2026-10-11T08:00:00Z' })], adjustments: [], today: '2026-10-20', settings: DEFAULT_SETTINGS });
+    assert.equal(acc.outstanding, M(1000));
+    assert.equal(acc.writtenOff, 0);
+  });
+});

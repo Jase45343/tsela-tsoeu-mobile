@@ -13,7 +13,6 @@ import {
   parts,
   periodsToGenerate,
   todayInMaseru,
-  type CreditAdjustmentType,
   type FirstPeriodChoice,
   type ISODate,
   type Lang,
@@ -372,12 +371,26 @@ function useAppState() {
     [writePayment],
   );
 
-  const addCreditAdjustment = useCallback(async (studentId: string, type: CreditAdjustmentType, amount: Lisente, reason: string) => {
+  /** FR-039: record paid-ahead money given back to the parent. */
+  const returnPaidAhead = useCallback(async (studentId: string, amount: Lisente, note: string) => {
     const acc = accountById.get(studentId);
-    if (!acc || amount > acc.credit) throw new Error('exceeds_credit');
-    await repo.insertAdjustment(db(), { id: randomUUID(), studentId, type, amount, reason, createdAt: new Date().toISOString() });
+    if (!acc || amount > acc.credit) throw new Error('exceeds_paid_ahead');
+    await repo.insertAdjustment(db(), { id: randomUUID(), studentId, type: 'refunded_outside_app', amount, reason: note, createdAt: new Date().toISOString() });
     await afterWrite();
   }, [accountById, afterWrite]);
+
+  /** Forgive what is owed for one month. Not money received; undone by voiding it. */
+  const writeOff = useCallback(async (periodId: string, amount: Lisente, reason: string) => {
+    if (!profile) throw new Error('Not signed in');
+    const period = snapshot.periods.find((p) => p.id === periodId);
+    if (!period) throw new Error('Unknown month');
+    await repo.insertPayment(db(), {
+      id: randomUUID(), studentId: period.studentId, amount, method: 'Write-off', paymentDate: todayInMaseru(), reference: null, note: reason,
+      source: 'write_off', createdAt: new Date().toISOString(), idempotencyKey: `${profile.deviceId}:${randomUUID()}`, acknowledgementNumber: null,
+      longOffline: false, correctsPaymentId: null, writeOffPeriodId: periodId,
+    });
+    await afterWrite();
+  }, [afterWrite, profile, snapshot.periods]);
 
   const markAckShared = useCallback(async (ackId: string, via: string) => {
     await repo.markAckShared(db(), ackId, via);
@@ -425,7 +438,7 @@ function useAppState() {
     snapshot, accounts, accountById, unsyncedStudents, toReview,
     sync, syncing, syncProblem, syncMessage, lastSyncAt, daysSinceSync, pendingCount, failedCount, retryFailed,
     register, login, requestReset, confirmReset, unlock, signOut, closeAccount, updateRemoteSettings,
-    addStudent, updateStudent, setPeriodCancelled, adjustCharge, adjustCharges, recordPayment, voidPayment, correctPayment, addCreditAdjustment, markAckShared,
+    addStudent, updateStudent, setPeriodCancelled, adjustCharge, adjustCharges, recordPayment, voidPayment, correctPayment, returnPaidAhead, writeOff, markAckShared,
   };
 }
 

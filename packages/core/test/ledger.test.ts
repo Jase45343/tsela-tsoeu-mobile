@@ -214,7 +214,7 @@ describe('reports', () => {
     assert.equal(s.expected, M(2000));
     // Mpho's payment went FIFO to September, so October shows nothing recorded for him.
     assert.equal(s.recorded, M(400));
-    assert.equal(s.outstanding, s.expected - s.recorded);
+    assert.equal(s.outstanding, s.expected - s.recorded - s.writtenOff);
     assert.equal(s.received, M(1400));
     assert.equal(s.partial, 1);
     assert.equal(s.unpaid, 1);

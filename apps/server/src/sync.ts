@@ -180,20 +180,30 @@ export async function applyPush(q: Queryable, ctx: SyncContext, push: z.infer<ty
     if (!existing) {
       const dup = await q.query<{ id: string }>('SELECT id FROM payments WHERE user_id = $1 AND idempotency_key = $2', [ctx.userId, pay.idempotencyKey]);
       if (dup.rows[0]) { results.push(ignored(pay.id, `duplicate_of:${dup.rows[0].id}`)); continue; }
+      if (pay.source === 'write_off') {
+        const target = pay.writeOffPeriodId
+          ? (await q.query<{ student_id: string }>('SELECT student_id FROM billing_periods WHERE id = $1', [pay.writeOffPeriodId])).rows[0]
+          : undefined;
+        if (!target || target.student_id !== pay.studentId) { results.push(rejected(pay.id, 'unknown_period', 'Choose the month to write off')); continue; }
+        if (!pay.note?.trim()) { results.push(rejected(pay.id, 'reason_required', 'Give a reason for the write-off.')); continue; }
+      } else if (pay.writeOffPeriodId) {
+        results.push(rejected(pay.id, 'invalid', 'Only a write-off can target a month'));
+        continue;
+      }
       if (pay.correctsPaymentId) {
         const orig = (await q.query<{ user_id: string }>('SELECT user_id FROM payments WHERE id = $1', [pay.correctsPaymentId])).rows[0];
         if (!orig || orig.user_id !== ctx.userId) { results.push(rejected(pay.id, 'unknown_original', 'The record being corrected was not found')); continue; }
       }
       await q.query(
         `INSERT INTO payments (id, user_id, student_id, amount, method, payment_date, reference, note, source, idempotency_key,
-           acknowledgement_number, device_id, created_by, created_at, long_offline, voided_at, void_reason, corrects_payment_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$2,$13,$14,$15,$16,$17)`,
+           acknowledgement_number, device_id, created_by, created_at, long_offline, voided_at, void_reason, corrects_payment_id, write_off_period_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$2,$13,$14,$15,$16,$17,$18)`,
         [pay.id, ctx.userId, pay.studentId, pay.amount, pay.method, pay.paymentDate, pay.reference ?? null, pay.note ?? null, pay.source,
           pay.idempotencyKey, pay.acknowledgementNumber ?? null, ctx.deviceId, pay.createdAt, pay.longOffline, pay.voidedAt ?? null,
-          pay.voidReason ?? null, pay.correctsPaymentId ?? null],
+          pay.voidReason ?? null, pay.correctsPaymentId ?? null, pay.writeOffPeriodId ?? null],
       );
       const { voidedAt: _v, voidReason: _r, ...created } = pay;
-      await audit(q, { userId: ctx.userId, deviceId: ctx.deviceId, entityType: 'payment', entityId: pay.id, action: pay.correctsPaymentId ? 'adjust' : 'create', next: created });
+      await audit(q, { userId: ctx.userId, deviceId: ctx.deviceId, entityType: 'payment', entityId: pay.id, action: pay.source === 'write_off' ? 'write_off' : pay.correctsPaymentId ? 'adjust' : 'create', next: created });
       if (pay.voidedAt) {
         await audit(q, { userId: ctx.userId, deviceId: ctx.deviceId, entityType: 'payment', entityId: pay.id, action: 'void', previous: { voidedAt: null }, next: { voidedAt: pay.voidedAt, voidReason: pay.voidReason } });
       }
@@ -231,7 +241,7 @@ export async function applyPush(q: Queryable, ctx: SyncContext, push: z.infer<ty
     if (existing) { results.push(ok(a.id)); continue; }
     const ledger = computeLedger(await loadStudentLedgerInputs(q, a.studentId));
     if (a.amount > ledger.credit) {
-      results.push(rejected(a.id, 'exceeds_credit', `Only ${ledger.credit} lisente of credit is available`));
+      results.push(rejected(a.id, 'exceeds_paid_ahead', `Only M${(ledger.credit / 100).toFixed(2)} paid ahead can be returned`));
       continue;
     }
     await q.query(
@@ -313,7 +323,7 @@ export async function pullChanges(q: Queryable, userId: string, cursor: number) 
       id: r.id, studentId: r.student_id, amount: r.amount, method: r.method, paymentDate: r.payment_date,
       reference: r.reference, note: r.note, source: r.source, createdAt: r.created_at, idempotencyKey: r.idempotency_key,
       acknowledgementNumber: r.acknowledgement_number, voidedAt: r.voided_at, voidReason: r.void_reason,
-      correctsPaymentId: r.corrects_payment_id, longOffline: r.long_offline,
+      correctsPaymentId: r.corrects_payment_id, longOffline: r.long_offline, writeOffPeriodId: r.write_off_period_id,
     })),
     creditAdjustments: adjustments.rows.map((r) => ({
       id: r.id, studentId: r.student_id, type: r.type, amount: r.amount, reason: r.reason, createdAt: r.created_at,

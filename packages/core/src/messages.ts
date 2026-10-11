@@ -39,7 +39,7 @@ const ACK: Record<Lang, {
     method: 'Method',
     reference: 'Reference',
     balance: (asOf) => `Balance still owed as of ${asOf}`,
-    credit: (asOf) => `Paid ahead (credit) as of ${asOf}`,
+    credit: (asOf) => `Paid ahead as of ${asOf}`,
     pending: 'not yet confirmed online',
     footer: (b) => `${b} has recorded this payment. This is an acknowledgement for your reference, not a tax or fiscal receipt.`,
   },

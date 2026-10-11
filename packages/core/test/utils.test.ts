@@ -67,7 +67,7 @@ describe('messages', () => {
     const t = acknowledgementText(data);
     assert.match(t, /DEV3-000142/);
     assert.match(t, /not a tax or fiscal receipt/);
-    assert.match(t, /Paid ahead \(credit\) as of 6 October 2026, 14:05 \(not yet confirmed online\): M200/);
+    assert.match(t, /Paid ahead as of 6 October 2026, 14:05 \(not yet confirmed online\): M200/);
   });
   it('builds reminders with no payment link', () => {
     const t = reminderText({ parentName: 'Palesa', studentName: 'Mpho', businessName: 'Thabo Transport', periods: [{ year: 2026, month: 9, balance: 40000 }], total: 40000 });

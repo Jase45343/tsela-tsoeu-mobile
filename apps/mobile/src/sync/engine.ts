@@ -53,6 +53,7 @@ export async function runSync(db: DB, token: string, deviceId: string): Promise<
       id: r.id, studentId: r.student_id, amount: r.amount, method: r.method, paymentDate: r.payment_date, reference: r.reference,
       note: r.note, source: r.source, createdAt: r.created_at, idempotencyKey: r.idempotency_key, acknowledgementNumber: r.ack_number,
       voidedAt: r.voided_at, voidReason: r.void_reason, correctsPaymentId: r.corrects_payment_id, longOffline: r.long_offline === 1,
+      writeOffPeriodId: r.write_off_period_id ?? null,
     })),
     creditAdjustments: adjustments!.map((r) => ({ id: r.id, studentId: r.student_id, type: r.type, amount: r.amount, reason: r.reason, createdAt: r.created_at })),
     acknowledgements: acks!.map((r) => ({
@@ -114,12 +115,12 @@ export async function runSync(db: DB, token: string, deviceId: string): Promise<
     for (const p of res.payments) {
       await tx.runAsync(
         `INSERT INTO payments (id, student_id, amount, method, payment_date, reference, note, source, created_at, idempotency_key, ack_number,
-           long_offline, voided_at, void_reason, corrects_payment_id, rev, sync_status)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'synced')
+           long_offline, voided_at, void_reason, corrects_payment_id, write_off_period_id, rev, sync_status)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'synced')
          ON CONFLICT(id) DO UPDATE SET voided_at=excluded.voided_at, void_reason=excluded.void_reason, ack_number=excluded.ack_number
          WHERE payments.sync_status = 'synced'`,
         [p.id, p.studentId, p.amount, p.method, p.paymentDate, p.reference, p.note, p.source, p.createdAt, p.idempotencyKey,
-          p.acknowledgementNumber, p.longOffline ? 1 : 0, p.voidedAt, p.voidReason, p.correctsPaymentId],
+          p.acknowledgementNumber, p.longOffline ? 1 : 0, p.voidedAt, p.voidReason, p.correctsPaymentId, p.writeOffPeriodId ?? null],
       );
     }
 

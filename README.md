@@ -100,6 +100,23 @@ months already charged never change unless the driver changes one by hand.
 - Any month's charge can be changed by hand with a reason; the change is audited on the server.
 - Code: `packages/core/src/charges.ts`, `apps/server/migrations/002_billing_rules.sql`, `apps/mobile/app/billing.tsx`, `review.tsx`, `charge.tsx`.
 
+## Paid ahead and write-offs (v1.5)
+
+- Money paid beyond what is owed is **paid ahead**: it pays the coming months automatically. The app never calls it "credit".
+- Paid-ahead money can only be **returned to the parent** (recorded with a note). It cannot be written off.
+- **Write off what's owed** forgives one month's debt with a reason. It is stored as a non-cash record (`source = 'write_off'`,
+  `write_off_period_id`), applied before cash, never becomes paid-ahead money, is excluded from cash received and daily
+  reports, and is undone by voiding it. Code: `packages/core/src/allocation.ts`, `apps/server/migrations/003_write_offs.sql`.
+
+## Looking ahead (v1.6)
+
+- **Reports → Month** steps up to 12 months ahead. Future months show what's expected, how much is already paid ahead,
+  what's still to collect, and each student's position.
+- **Student page → Coming months** lists the months their paid-ahead money covers, and the first month still to pay.
+- **Paid ahead list** (from the home screen figure or Reports): every family with money paid ahead and how far it reaches.
+- Months not yet charged are estimates using the driver's billing rules, computed the same way the server will create them
+  on the 1st; holiday months that will need a decision are estimated at the full fee. Code: `packages/core/src/forecast.ts`.
+
 ## Decisions made while building
 
 - **Payments are immutable.** A wrong record is voided, or voided and replaced by a correction

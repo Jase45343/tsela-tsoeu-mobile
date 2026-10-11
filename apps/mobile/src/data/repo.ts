@@ -55,7 +55,7 @@ export const rowToPayment = (r: Row): LocalPayment => ({
   id: r.id, studentId: r.student_id, amount: r.amount, method: r.method, paymentDate: r.payment_date,
   reference: r.reference, note: r.note, source: r.source, createdAt: r.created_at, idempotencyKey: r.idempotency_key,
   acknowledgementNumber: r.ack_number, longOffline: b(r.long_offline), voidedAt: r.voided_at, voidReason: r.void_reason,
-  correctsPaymentId: r.corrects_payment_id,
+  correctsPaymentId: r.corrects_payment_id, writeOffPeriodId: r.write_off_period_id ?? null,
 });
 export const rowToAdjustment = (r: Row): CreditAdjustment => ({
   id: r.id, studentId: r.student_id, type: r.type, amount: r.amount, reason: r.reason, createdAt: r.created_at,
@@ -129,10 +129,11 @@ export async function setPeriodAmount(db: DB, id: string, amount: number, reason
 export async function insertPayment(db: DB, p: LocalPayment): Promise<void> {
   await db.runAsync(
     `INSERT INTO payments (id, student_id, amount, method, payment_date, reference, note, source, created_at, idempotency_key, ack_number,
-       long_offline, voided_at, void_reason, corrects_payment_id, rev, sync_status)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending')`,
+       long_offline, voided_at, void_reason, corrects_payment_id, write_off_period_id, rev, sync_status)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'pending')`,
     [p.id, p.studentId, p.amount, p.method, p.paymentDate, p.reference ?? null, p.note ?? null, p.source, p.createdAt, p.idempotencyKey,
-      p.acknowledgementNumber ?? null, p.longOffline ? 1 : 0, p.voidedAt ?? null, p.voidReason ?? null, p.correctsPaymentId ?? null],
+      p.acknowledgementNumber ?? null, p.longOffline ? 1 : 0, p.voidedAt ?? null, p.voidReason ?? null, p.correctsPaymentId ?? null,
+      p.writeOffPeriodId ?? null],
   );
 }
 
